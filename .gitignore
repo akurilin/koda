@@ -15,8 +15,13 @@ build/
 dist/
 .turbo/
 
-# Test and coverage output
+# Test and coverage output. Playwright is configured to write to /tmp/koda,
+# but keep these guards for accidental local output.
 coverage/
+test-results/
+playwright-report/
+web/test-results/
+web/playwright-report/
 
 # Logs
 npm-debug.log*
@@ -26,6 +31,7 @@ yarn-error.log*
 
 # Environment files
 .env*
+!.env.example
 
 # Vercel
 .vercel/
