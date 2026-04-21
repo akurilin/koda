@@ -24,10 +24,12 @@ This is a monorepo Git repository. The Next.js codebase lives under the
 - Do not commit changes unless the user explicitly asks you to commit.
 - Do not push changes to a Git remote unless the user explicitly asks you to
   push.
-- Before changes are ready to commit, run Prettier manually from the `web/`
-  package with `npm run format`.
-- Do not add automated Git hooks yet; formatting should remain a manual
-  pre-commit step while the project is in flux.
+- Before changes are ready to commit, run Prettier manually from the repository
+  root with `npm run format` (or `npm --prefix web run format`).
+- Static analysis runs automatically via `pre-commit` on every commit: ESLint,
+  Prettier, `tsc --noEmit`, `shellcheck`, `gitleaks`, and `squawk` (Postgres
+  migration safety). Install once with `pre-commit install` from the repo root.
+  Do not bypass the hooks with `--no-verify`; fix the underlying issue instead.
 
 ## Validating UI changes
 

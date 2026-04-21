@@ -14,10 +14,13 @@ From the repository root:
 
 ```bash
 nvm use
-cd web
-npm install
+npm --prefix web install
 npm run dev
 ```
+
+The repo root ships proxy scripts (`npm run lint`, `npm run typecheck`,
+`npm run test`, `npm run format`, `npm run dev`, …) that delegate into
+`web/`, so day-to-day commands don't need a `cd`.
 
 The Supabase stack must be running locally before the app can read or write
 documents:
@@ -25,6 +28,25 @@ documents:
 ```bash
 npx supabase start
 npx supabase migration up
+```
+
+## Static analysis (pre-commit)
+
+Every commit runs through [pre-commit](https://pre-commit.com/): ESLint,
+Prettier, `tsc --noEmit`, [shellcheck](https://www.shellcheck.net/),
+[gitleaks](https://github.com/gitleaks/gitleaks) for secret scanning, and
+[squawk](https://github.com/sbdchd/squawk) for Postgres migration safety.
+
+Install the git hook once per checkout:
+
+```bash
+pre-commit install
+```
+
+To run the full suite against the whole repo on demand:
+
+```bash
+pre-commit run --all-files
 ```
 
 ## Known trade-offs

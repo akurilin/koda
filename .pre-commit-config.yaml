@@ -1,0 +1,80 @@
+# Static analysis gate that runs before every commit.
+#
+# Upstream hooks (pinned to tagged releases) cover secret-scanning, shell
+# script linting, Postgres migration safety, and generic file hygiene.
+# The `local` hooks delegate to the web/ package's own scripts so the same
+# lint/typecheck/format commands run in CI, in pre-commit, and by hand.
+#
+# Install once per checkout with: `pre-commit install`
+
+repos:
+  # Generic file hygiene: trailing whitespace, final newline, merge markers,
+  # accidental giant binaries, broken YAML.
+  #
+  # `web/public/` holds Next.js boilerplate assets we don't own; skip
+  # whitespace normalization there so we don't drift from upstream on
+  # files we never edit by hand.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        # Markdown uses trailing spaces for line breaks — leave those alone.
+        args: [--markdown-linebreak-ext=md]
+        exclude: ^web/public/
+      - id: end-of-file-fixer
+        exclude: ^web/public/
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+
+  # Secret scanner. Catches accidentally committed API keys / tokens / creds.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  # Shell script linter. The repo has no *.sh files today; this is a guard
+  # so any future script is forced through the same quality bar.
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+
+  # Postgres migration safety linter. Catches unsafe DDL patterns
+  # (NOT NULL without default on a rewritten table, non-CONCURRENT index
+  # creation, destructive column drops, etc.) before they hit production.
+  - repo: https://github.com/sbdchd/squawk
+    rev: v2.48.0
+    hooks:
+      - id: squawk
+        files: ^supabase/migrations/.*\.sql$
+
+  # Local hooks: delegate to the web/ package's npm scripts so we have one
+  # canonical definition of "lint" / "typecheck" / "format" that can be run
+  # by hand, in pre-commit, and in CI.
+  #
+  # These run on the entire web/ package (not just staged files) because
+  # ESLint cross-file rules and `tsc` both need the full graph to be sound.
+  - repo: local
+    hooks:
+      - id: prettier
+        name: prettier (format check)
+        entry: npm --prefix web run format:check
+        language: system
+        pass_filenames: false
+        files: ^web/.*\.(ts|tsx|js|jsx|mjs|cjs|json|md|css|yaml|yml)$
+
+      - id: eslint
+        name: eslint
+        entry: npm --prefix web run lint
+        language: system
+        pass_filenames: false
+        files: ^web/.*\.(ts|tsx|js|jsx|mjs|cjs)$
+
+      - id: typecheck
+        name: tsc --noEmit
+        entry: npm --prefix web run typecheck
+        language: system
+        pass_filenames: false
+        files: ^web/.*\.(ts|tsx)$

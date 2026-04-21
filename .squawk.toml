@@ -1,0 +1,42 @@
+# Squawk config — Postgres migration safety.
+#
+# Supabase runs each migration file inside an implicit transaction and
+# tracks applied migrations in its own schema. That interacts awkwardly
+# with a handful of squawk's default rules, so we disable them to keep
+# the hook as high-signal as possible:
+#
+#   - require-concurrent-index-creation / -deletion: `CREATE INDEX
+#     CONCURRENTLY` and `DROP INDEX CONCURRENTLY` cannot run inside a
+#     transaction block, so they're incompatible with Supabase's runner.
+#
+#   - require-timeout-settings: setting per-session lock_timeout /
+#     statement_timeout on every migration is ops hygiene we don't
+#     benefit from until we have a production cluster to protect.
+#
+#   - prefer-robust-stmts: `IF EXISTS` / `IF NOT EXISTS` guards matter
+#     when migrations are re-applied by hand; Supabase tracks state,
+#     so partial reruns aren't a real failure mode for us.
+#
+# Everything else stays on: destructive column drops, unsafe NOT NULL
+# additions, column renames/type changes, etc. — the rules that would
+# actually cause downtime — still fail the hook.
+
+assume_in_transaction = true
+
+excluded_rules = [
+    "require-concurrent-index-creation",
+    "require-concurrent-index-deletion",
+    "require-timeout-settings",
+    "prefer-robust-stmts",
+
+    # The schema is still fluid and there are no external clients of the
+    # database besides this app. Dropping columns during pre-production
+    # iteration is expected; re-enable this rule once we have downstream
+    # consumers that could break on a column drop.
+    "ban-drop-column",
+
+    # `sort_index` and `revision` won't plausibly exceed 2^31 in a
+    # single-writer prose editor. Revisit if we ever add per-keystroke
+    # revisions or otherwise grow into the INT range.
+    "prefer-bigint-over-int",
+]

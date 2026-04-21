@@ -1,0 +1,23 @@
+{
+  "name": "koda2",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Root-level proxy scripts so monorepo commands can run from the repository root without cd-ing into web/.",
+  "scripts": {
+    "dev": "npm --prefix web run dev",
+    "build": "npm --prefix web run build",
+    "start": "npm --prefix web run start",
+    "lint": "npm --prefix web run lint",
+    "format": "npm --prefix web run format",
+    "format:check": "npm --prefix web run format:check",
+    "typecheck": "npm --prefix web run typecheck",
+    "test": "npm --prefix web run test",
+    "test:unit": "npm --prefix web run test:unit",
+    "test:integration": "npm --prefix web run test:integration",
+    "test:e2e": "npm --prefix web run test:e2e"
+  },
+  "engines": {
+    "node": "24.15.0",
+    "npm": "11.12.1"
+  }
+}
