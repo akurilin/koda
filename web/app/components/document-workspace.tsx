@@ -16,9 +16,9 @@
 //     `readOnly`, flush any pending autosave before the agent starts, and
 //     refresh the document once the agent finishes so the user sees the
 //     final state before they can type again.
-//   - Expose a "Demo text" escape hatch that fully replaces the document
-//     with a preset article, confirmed via a modal because it destroys the
-//     user's current content.
+//   - Expose a "Replace with demo text" escape hatch that fully overwrites
+//     the document with a preset article, confirmed via a modal because it
+//     destroys the user's current content.
 //
 // The `editorVersion` counter is used as the BlockNote key so we can force
 // the editor to remount when the server-side state diverges from what the
@@ -497,7 +497,7 @@ function DocumentWorkspaceInner({
             className="inline-flex items-center gap-1.5 rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-zinc-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900 disabled:cursor-not-allowed disabled:opacity-50"
             data-testid="demo-text-button"
           >
-            Demo text
+            Replace with demo text
           </button>
           <div
             className={`rounded border px-2 py-1 text-xs ${
