@@ -29,7 +29,7 @@ import {
   getOrCreatePrimaryDocumentRecord,
   insertBlockAfterRecord,
   listBlockRecords,
-  syncTopLevelBlockRecords,
+  syncDocumentBlockRecords,
   updateBlockOrder,
   updateBlockRecord,
 } from "./document-repository";
@@ -306,7 +306,7 @@ export async function syncDocumentBlocks(input: {
   source?: MutationSource;
 }): Promise<MutationResult<DocumentBlockRecord[]>> {
   const blocks = input.blocks.map((block) => prepareBlock(block));
-  const result = await syncTopLevelBlockRecords({
+  const result = await syncDocumentBlockRecords({
     documentId: input.documentId,
     blocks,
     expectedRevisions: input.expectedRevisions,

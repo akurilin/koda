@@ -71,6 +71,26 @@ describe("blocknote block utilities", () => {
     ).toThrow("Unsupported block type");
   });
 
+  it("rejects blocks with nested children", () => {
+    expect(() =>
+      normalizeBlock({
+        id: "block-a",
+        type: "bulletListItem",
+        props: {},
+        content: "parent",
+        children: [
+          {
+            id: "block-b",
+            type: "bulletListItem",
+            props: {},
+            content: "child",
+            children: [],
+          },
+        ],
+      }),
+    ).toThrow("Nested block children are not supported.");
+  });
+
   it("sorts document rows by sort index", () => {
     expect(
       buildDocumentFromRows([

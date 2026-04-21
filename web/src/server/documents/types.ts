@@ -47,6 +47,10 @@ export type InlineContent = InlineText | InlineLink;
  * We persist the full BlockNote JSON so the editor can be re-hydrated without
  * a lossy transform, while `plain_text` in the row acts as a searchable /
  * agent-facing projection of the same content.
+ *
+ * `children` is kept on the type only because BlockNote emits and expects the
+ * field on every block; the app treats the document as a flat list and
+ * `normalizeBlock` rejects any block with a non-empty `children` array.
  */
 export type BlockNoteBlock = {
   id: string;
@@ -74,13 +78,12 @@ export type DocumentRecord = {
  * One stored block, with the bookkeeping we need for optimistic concurrency.
  *
  * `revision` is bumped on every content-changing update and is the basis of
- * the conflict checks surfaced through the mutation API. `sortIndex` orders
- * siblings within the same `parentBlockId` level.
+ * the conflict checks surfaced through the mutation API. `sortIndex` is the
+ * authoring position within the document's flat block list.
  */
 export type DocumentBlockRecord = {
   id: string;
   documentId: string;
-  parentBlockId: string | null;
   sortIndex: number;
   blockType: SupportedBlockType;
   contentFormat: "blocknote_v1";

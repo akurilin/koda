@@ -61,20 +61,14 @@ export function replaceBlockText(
 }
 
 /**
- * Flatten a block (and its children) to plain text.
+ * Flatten a block to plain text.
  *
  * Persisted alongside each block so that search and the agent's view of the
  * document have a cheap, pre-rendered representation without re-walking the
  * inline-content tree on every read.
  */
 export function blockToPlainText(block: BlockNoteBlock): string {
-  const ownText = inlineContentToPlainText(block.content);
-  const childText = block.children
-    .map((child) => blockToPlainText(child))
-    .filter(Boolean)
-    .join("\n");
-
-  return [ownText, childText].filter(Boolean).join("\n");
+  return inlineContentToPlainText(block.content);
 }
 
 /**
@@ -110,16 +104,23 @@ export function normalizeBlock(
 
   const props = isRecord(value.props) ? value.props : {};
   const content = normalizeInlineContent(value.content);
-  const children = Array.isArray(value.children)
-    ? value.children.map((child) => normalizeBlock(child))
-    : [];
+
+  // The editor treats the document as a flat list of blocks. Accept the field
+  // because BlockNote always emits it, but refuse any nested children so we
+  // never persist a tree we don't know how to address elsewhere in the app.
+  if (value.children !== undefined && !Array.isArray(value.children)) {
+    throw new Error("Block children must be an array.");
+  }
+  if (Array.isArray(value.children) && value.children.length > 0) {
+    throw new Error("Nested block children are not supported.");
+  }
 
   return {
     id,
     type,
     props,
     content,
-    children,
+    children: [],
   };
 }
 
@@ -140,21 +141,6 @@ export function buildDocumentFromRows<T extends { sortIndex: number }>(
   rows: T[],
 ): T[] {
   return [...rows].sort((a, b) => a.sortIndex - b.sortIndex);
-}
-
-/**
- * Depth-first flatten of a block tree.
- *
- * Handy when an operation needs to touch every descendant (e.g. collecting
- * all IDs) without caring about structural nesting.
- */
-export function flattenDocumentBlocks(
-  blocks: BlockNoteBlock[],
-): BlockNoteBlock[] {
-  return blocks.flatMap((block) => [
-    block,
-    ...flattenDocumentBlocks(block.children),
-  ]);
 }
 
 function inlineContentToPlainText(content: BlockNoteBlock["content"]): string {

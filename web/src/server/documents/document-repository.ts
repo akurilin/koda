@@ -26,7 +26,6 @@ type RawDocumentRow = {
 type RawBlockRow = {
   id: string;
   document_id: string;
-  parent_block_id: string | null;
   sort_index: number;
   block_type: SupportedBlockType;
   content_format: "blocknote_v1";
@@ -130,10 +129,7 @@ export async function deleteDocumentRecord(documentId: string): Promise<void> {
 }
 
 /**
- * Load the top-level blocks of a document in authoring order.
- *
- * Nested children live in `block_json.children` rather than their own rows,
- * so we intentionally only read rows with a null `parent_block_id`.
+ * Load the blocks of a document in authoring order.
  */
 export async function listBlockRecords(
   documentId: string,
@@ -142,7 +138,6 @@ export async function listBlockRecords(
     SELECT *
     FROM document_blocks
     WHERE document_id = ${documentId}
-      AND parent_block_id IS NULL
     ORDER BY sort_index ASC
   `;
 
@@ -177,7 +172,6 @@ export async function appendBlockRecord(input: {
       SELECT COALESCE(MAX(sort_index) + 1, 0) AS next_sort_index
       FROM document_blocks
       WHERE document_id = ${input.documentId}
-        AND parent_block_id IS NULL
     `;
 
     const [row] = await tx<RawBlockRow[]>`
@@ -239,7 +233,6 @@ export async function insertBlockAfterRecord(input: {
       UPDATE document_blocks
       SET sort_index = sort_index + 1
       WHERE document_id = ${input.documentId}
-        AND parent_block_id IS NULL
         AND sort_index >= ${sortIndex}
     `;
 
@@ -324,7 +317,6 @@ export async function deleteBlockRecord(input: {
       UPDATE document_blocks
       SET sort_index = sort_index - 1
       WHERE document_id = ${input.documentId}
-        AND parent_block_id IS NULL
         AND sort_index > ${deleted.sort_index}
     `;
 
@@ -333,13 +325,13 @@ export async function deleteBlockRecord(input: {
 }
 
 /**
- * Apply a new ordering to the top-level blocks of a document.
+ * Apply a new ordering to the blocks of a document.
  *
  * The two-pass write is deliberate: `document_blocks(document_id, sort_index)`
- * is unique per parent, so we first shove every row into a temporary index
- * range (`temporarySortIndex`) to avoid transient duplicates, then write the
- * final indices. Doing this as a single UPDATE would hit the unique
- * constraint mid-flight.
+ * is unique, so we first shove every row into a temporary index range
+ * (`temporarySortIndex`) to avoid transient duplicates, then write the final
+ * indices. Doing this as a single UPDATE would hit the unique constraint
+ * mid-flight.
  */
 export async function updateBlockOrder(input: {
   documentId: string;
@@ -368,7 +360,6 @@ export async function updateBlockOrder(input: {
       SELECT *
       FROM document_blocks
       WHERE document_id = ${input.documentId}
-        AND parent_block_id IS NULL
       ORDER BY sort_index ASC
     `;
 
@@ -377,8 +368,7 @@ export async function updateBlockOrder(input: {
 }
 
 /**
- * Reconcile a document's top-level blocks with a full set submitted by the
- * editor.
+ * Reconcile a document's blocks with a full set submitted by the editor.
  *
  * This is the hot path for the client's debounced "save everything" flow:
  * the editor sends the entire current state plus the revisions it believed
@@ -397,7 +387,7 @@ export async function updateBlockOrder(input: {
  * edit coexist without clobbering each other — see `document-service.ts`
  * for the higher-level contract.
  */
-export async function syncTopLevelBlockRecords(input: {
+export async function syncDocumentBlockRecords(input: {
   documentId: string;
   blocks: PersistedBlockInput[];
   expectedRevisions: Record<string, number | undefined>;
@@ -410,7 +400,6 @@ export async function syncTopLevelBlockRecords(input: {
       SELECT *
       FROM document_blocks
       WHERE document_id = ${input.documentId}
-        AND parent_block_id IS NULL
       ORDER BY sort_index ASC
       FOR UPDATE
     `;
@@ -532,7 +521,6 @@ export async function syncTopLevelBlockRecords(input: {
       SELECT *
       FROM document_blocks
       WHERE document_id = ${input.documentId}
-        AND parent_block_id IS NULL
       ORDER BY sort_index ASC
     `;
 
@@ -558,7 +546,6 @@ function mapBlockRow(row: RawBlockRow): DocumentBlockRecord {
   return {
     id: row.id,
     documentId: row.document_id,
-    parentBlockId: row.parent_block_id,
     sortIndex: row.sort_index,
     blockType: row.block_type,
     contentFormat: row.content_format,
