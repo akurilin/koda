@@ -85,6 +85,13 @@ export type DocumentRecord = {
  * `revision` is bumped on every content-changing update and is the basis of
  * the conflict checks surfaced through the mutation API. `sortIndex` is the
  * authoring position within the document's flat block list.
+ *
+ * `feedback` is open-ended prose the main-editor agent attaches during a
+ * whole-article review (see the `setBlockFeedback` tool). It's a side-
+ * channel to content: it does not participate in the revision check and
+ * is excluded from the autosave sync path so the user's typing cannot
+ * clobber agent feedback. Cleared automatically when the block is saved
+ * out of workshop mode (resolved) or explicitly via the feedback endpoint.
  */
 export type DocumentBlockRecord = {
   id: string;
@@ -95,6 +102,7 @@ export type DocumentBlockRecord = {
   blockJson: BlockNoteBlock;
   plainText: string;
   revision: number;
+  feedback: string | null;
   createdAt: string;
   updatedAt: string;
 };

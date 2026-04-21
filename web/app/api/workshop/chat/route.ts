@@ -33,6 +33,12 @@ type WorkshopContext = {
   targetBlockId: string;
   versions: InlineContent[][];
   currentVersionIndex: number;
+  // Freeform note the main-editor agent left on this block during a
+  // whole-article review. When present, the client renders it as the
+  // opening assistant message of the workshop thread and the system
+  // prompt folds it in so the model knows what the user was invited
+  // to address. Null when there's no carried-over feedback.
+  feedback: string | null;
 };
 
 type WorkshopRequestBody = {
@@ -142,6 +148,20 @@ function composeWorkshopSystemPrompt(context: WorkshopContext): string {
   const currentVersion = context.versions[context.currentVersionIndex];
   const currentVersionJson = JSON.stringify(currentVersion, null, 2);
 
+  // When the user entered workshop from a block that had a reviewer note,
+  // the client seeds the thread UI with that note rendered as the opening
+  // assistant message. We also fold it into the system prompt so the
+  // model has the same framing — otherwise the user's first reply (often
+  // just "yes") would look unanchored.
+  const feedbackLines = context.feedback
+    ? [
+        "",
+        "Reviewer note left on the workshopped paragraph by the main-editor agent:",
+        `  ${context.feedback}`,
+        'The user has already seen this note as your opening message in this thread ("want to get started on it?"). If their first reply is an acknowledgement ("yes", "let\'s do it", "go"), interpret it as asking you to act on the note directly — ask a clarifying question or propose a rewrite as appropriate. If the user redirects, ignore the note and follow their lead.',
+      ]
+    : [];
+
   return [
     "You are helping the user workshop a single paragraph of prose.",
     "The paragraph is one block within a larger document; use the surrounding content as context, but only propose changes to the workshopped paragraph.",
@@ -157,6 +177,7 @@ function composeWorkshopSystemPrompt(context: WorkshopContext): string {
     "You can call `proposeRewrite` multiple times in a single turn only if the user has explicitly asked for multiple alternative proposals.",
     "Preserve the writer's voice, intent, and any inline styling (bold, italic, underline, strike, code, links) from the current version unless the user explicitly asks you to change them. The markdown rendering above shows which spans are styled; match the same spans (or their equivalents) in your rewrite.",
     "Ask clarifying questions in chat when the user's intent is unclear. Do not propose a rewrite if you are not sure what the user wants.",
+    ...feedbackLines,
     "",
     "Document (the workshopped paragraph is marked):",
     ...docLines,

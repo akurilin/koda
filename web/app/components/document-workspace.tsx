@@ -27,7 +27,9 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { FaHouse } from "react-icons/fa6";
 import {
   useCallback,
   useEffect,
@@ -43,6 +45,7 @@ import {
 } from "@assistant-ui/react-ai-sdk";
 import { AssistantPanel } from "./assistant-panel";
 import { buildDemoArticleBlocks } from "./demo-article";
+import { FeedbackOverlays } from "./feedback-overlay";
 import { WorkshopWorkspace } from "./workshop-workspace";
 import type {
   BlockNoteBlock,
@@ -201,6 +204,42 @@ function DocumentWorkspaceInner({
       ) as Record<string, number>,
     [document.blocks],
   );
+
+  // Set of block ids with active reviewer feedback, threaded into the
+  // editor so the side-menu can conditionally render the "Clear
+  // feedback" (X) button. Empty strings count as "no feedback" —
+  // matches the service-layer normalization so the UI and DB stay in
+  // lock-step about what "has feedback" means.
+  const blocksWithFeedback = useMemo(
+    () =>
+      new Set(
+        document.blocks
+          .filter((block) => block.feedback && block.feedback.length > 0)
+          .map((block) => block.id),
+      ),
+    [document.blocks],
+  );
+
+  // X-button handler. The feedback endpoint returns the updated block
+  // so we can merge it into state without a full refetch — keeps the
+  // orange bar from flickering through a stale frame before the next
+  // background poll lands.
+  const clearBlockFeedback = useCallback(async (blockId: string) => {
+    const response = await fetch(
+      `/api/documents/${documentRef.current.id}/blocks/${blockId}/feedback`,
+      { method: "DELETE" },
+    );
+    if (!response.ok) {
+      return;
+    }
+    const updatedBlock = (await response.json()) as DocumentBlockRecord;
+    setDocument((currentDocument) => ({
+      ...currentDocument,
+      blocks: currentDocument.blocks.map((block) =>
+        block.id === updatedBlock.id ? updatedBlock : block,
+      ),
+    }));
+  }, []);
 
   // Pull the freshest server copy. Called by the background poll and after
   // a conflict so the user sees the truth instead of their stale buffer.
@@ -584,6 +623,7 @@ function DocumentWorkspaceInner({
         documentBlocks={document.blocks.map((block) => block.blockJson)}
         targetBlock={workshopTarget.blockJson}
         targetBlockRevision={workshopTarget.revision}
+        targetBlockFeedback={workshopTarget.feedback}
         onCancel={() => returnToMainDoc(workshopTarget.id)}
         onSaved={handleWorkshopSaved}
       />
@@ -594,15 +634,25 @@ function DocumentWorkspaceInner({
     <main className="flex h-screen min-h-0 bg-[#f6f5f2] text-zinc-950">
       <section className="flex min-w-0 flex-1 flex-col border-r border-zinc-200 bg-white">
         <header className="flex h-14 shrink-0 items-center justify-between border-b border-zinc-200 px-6">
-          <button
-            type="button"
-            onClick={() => setDemoDialogOpen(true)}
-            disabled={demoBusy || isAgentRunning}
-            className="inline-flex items-center gap-1.5 rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-zinc-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900 disabled:cursor-not-allowed disabled:opacity-50"
-            data-testid="demo-text-button"
-          >
-            Replace with demo text
-          </button>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/"
+              aria-label="Go home"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-zinc-200 text-zinc-600 transition hover:bg-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900"
+              data-testid="home-button"
+            >
+              <FaHouse size={14} aria-hidden="true" />
+            </Link>
+            <button
+              type="button"
+              onClick={() => setDemoDialogOpen(true)}
+              disabled={demoBusy || isAgentRunning}
+              className="inline-flex items-center gap-1.5 rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-zinc-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900 disabled:cursor-not-allowed disabled:opacity-50"
+              data-testid="demo-text-button"
+            >
+              Replace with demo text
+            </button>
+          </div>
           <div
             className={`rounded border px-2 py-1 text-xs ${
               isAgentRunning
@@ -622,7 +672,7 @@ function DocumentWorkspaceInner({
         </header>
         <div
           ref={scrollContainerRef}
-          className={`min-h-0 flex-1 overflow-auto transition-opacity ${
+          className={`relative min-h-0 flex-1 overflow-auto transition-opacity ${
             isAgentRunning ? "opacity-75" : ""
           }`}
           data-testid="editor-pane"
@@ -632,12 +682,23 @@ function DocumentWorkspaceInner({
           // layout effect has set `scrollTop`.
           style={awaitingScrollRestore ? { visibility: "hidden" } : undefined}
         >
+          {/* Feedback overlays are absolutely positioned inside the
+              scroll container so they ride along as the user scrolls.
+              Rendered before the editor so they sit in z-order below
+              it for selection / caret interactions but above for
+              hover (z-20 on the popover). */}
+          <FeedbackOverlays
+            containerRef={scrollContainerRef}
+            blocks={document.blocks}
+          />
           <BlockNoteDocumentEditor
             key={editorVersion}
             initialBlocks={editorBlocks}
             onChange={handleEditorChange}
             readOnly={isAgentRunning}
             onWorkshopBlock={enterWorkshop}
+            blocksWithFeedback={blocksWithFeedback}
+            onClearBlockFeedback={clearBlockFeedback}
           />
         </div>
       </section>

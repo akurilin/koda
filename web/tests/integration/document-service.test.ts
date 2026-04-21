@@ -9,6 +9,7 @@ import {
   moveBlock,
   replaceBlock,
   replaceBlockText,
+  setBlockFeedback,
   syncDocumentBlocks,
 } from "@/src/server/documents/document-service";
 import { createTextBlock } from "@/src/server/documents/blocknote-blocks";
@@ -196,6 +197,164 @@ describe("document service", () => {
     expect(first.testRunId).toBeNull();
     expect(second.id).toBe(first.id);
     expect(second.testRunId).toBeNull();
+  });
+
+  // --- Agent feedback lifecycle ---
+  //
+  // The invariants the UI relies on:
+  //   1. `setBlockFeedback` writes open-ended prose without bumping the
+  //      content revision (otherwise concurrent user edits would race it).
+  //   2. Empty / whitespace payloads collapse to null so "clear" has one
+  //      canonical shape in the DB.
+  //   3. Any content-changing update (workshop save or agent edit) clears
+  //      the stored feedback — a rewrite of the block invalidates the
+  //      reviewer's note.
+  //   4. The whole-document sync path (autosave from main-editor typing)
+  //      must NOT touch feedback; otherwise a keystroke would clobber an
+  //      agent-authored note the user hasn't addressed yet.
+
+  it("sets block feedback without bumping the content revision", async () => {
+    const document = await createDocument({ testRunId });
+    const block = await appendTextBlock({
+      documentId: document.id,
+      text: "Paragraph",
+    });
+
+    const updated = await setBlockFeedback({
+      documentId: document.id,
+      blockId: block.id,
+      feedback: "This paragraph repeats the previous one.",
+    });
+
+    expect(updated?.feedback).toBe("This paragraph repeats the previous one.");
+    expect(updated?.revision).toBe(block.revision);
+  });
+
+  it("collapses empty and whitespace feedback to null", async () => {
+    const document = await createDocument({ testRunId });
+    const block = await appendTextBlock({
+      documentId: document.id,
+      text: "Paragraph",
+    });
+
+    await setBlockFeedback({
+      documentId: document.id,
+      blockId: block.id,
+      feedback: "a note",
+    });
+
+    const clearedViaEmpty = await setBlockFeedback({
+      documentId: document.id,
+      blockId: block.id,
+      feedback: "   ",
+    });
+    expect(clearedViaEmpty?.feedback).toBeNull();
+
+    await setBlockFeedback({
+      documentId: document.id,
+      blockId: block.id,
+      feedback: "another note",
+    });
+
+    const clearedViaNull = await setBlockFeedback({
+      documentId: document.id,
+      blockId: block.id,
+      feedback: null,
+    });
+    expect(clearedViaNull?.feedback).toBeNull();
+  });
+
+  it("returns null when setting feedback on a missing block", async () => {
+    const document = await createDocument({ testRunId });
+
+    const updated = await setBlockFeedback({
+      documentId: document.id,
+      blockId: "00000000-0000-0000-0000-000000000000",
+      feedback: "anything",
+    });
+
+    expect(updated).toBeNull();
+  });
+
+  it("clears feedback when the block is saved out of workshop mode", async () => {
+    const document = await createDocument({ testRunId });
+    const block = await appendTextBlock({
+      documentId: document.id,
+      text: "Before",
+    });
+
+    await setBlockFeedback({
+      documentId: document.id,
+      blockId: block.id,
+      feedback: "tighten this",
+    });
+
+    const result = await replaceBlock({
+      documentId: document.id,
+      blockId: block.id,
+      expectedRevision: block.revision,
+      blockJson: createTextBlock("After", "paragraph", block.id),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.feedback).toBeNull();
+
+    const reloaded = await getDocument(document.id);
+    expect(reloaded?.blocks[0]?.feedback).toBeNull();
+  });
+
+  it("clears feedback when the agent edits block text", async () => {
+    const document = await createDocument({ testRunId });
+    const block = await appendTextBlock({
+      documentId: document.id,
+      text: "Before",
+    });
+
+    await setBlockFeedback({
+      documentId: document.id,
+      blockId: block.id,
+      feedback: "tighten this",
+    });
+
+    const result = await replaceBlockText({
+      documentId: document.id,
+      blockId: block.id,
+      text: "After",
+      expectedRevision: block.revision,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.feedback).toBeNull();
+  });
+
+  it("preserves feedback across the whole-document sync path", async () => {
+    const document = await createDocument({ testRunId });
+    const block = await appendTextBlock({
+      documentId: document.id,
+      text: "Paragraph",
+    });
+
+    const annotated = await setBlockFeedback({
+      documentId: document.id,
+      blockId: block.id,
+      feedback: "keep me",
+    });
+
+    const result = await syncDocumentBlocks({
+      documentId: document.id,
+      blocks: [
+        createTextBlock("Paragraph with a typo fix", "paragraph", block.id),
+      ],
+      expectedRevisions: {
+        [block.id]: annotated?.revision ?? block.revision,
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value[0]?.feedback).toBe("keep me");
   });
 
   it("syncs editor blocks with revision checks", async () => {

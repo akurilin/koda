@@ -39,6 +39,13 @@ export type WorkshopChatContext = {
   targetBlockId: string;
   versions: InlineContent[][];
   currentVersionIndex: number;
+  // Reviewer note the main-editor agent left on this block. Rendered as
+  // the opening assistant message of the workshop thread when non-null,
+  // and folded into the workshop system prompt so the agent can act on
+  // it if the user's first reply is an acknowledgement. Frozen for the
+  // lifetime of the workshop session — the note is captured at workshop
+  // entry; subsequent DB changes don't re-seed it.
+  feedback: string | null;
 };
 
 type WorkshopAssistantPanelProps = {
@@ -47,6 +54,12 @@ type WorkshopAssistantPanelProps = {
   // when versions change.
   contextRef: React.RefObject<WorkshopChatContext>;
   onProposedRewrite: (content: InlineContent[]) => void;
+  // The reviewer note captured at workshop entry. Duplicated here (in
+  // addition to living on `contextRef.current.feedback`) so the opening-
+  // message card is a purely derived render without reading a ref during
+  // render — keeps React strict mode happy and makes the card a stable
+  // function of props.
+  initialFeedback: string | null;
 };
 
 // Context used by the module-level tool UI renderer to reach the current
@@ -62,6 +75,7 @@ const ProposedRewriteContext = createContext<{
 export function WorkshopAssistantPanel({
   contextRef,
   onProposedRewrite,
+  initialFeedback,
 }: WorkshopAssistantPanelProps) {
   // `body` accepts a function so the transport re-reads the workshop state
   // at request time; it sends alongside `messages` on every turn. The ref
@@ -104,12 +118,17 @@ export function WorkshopAssistantPanel({
           </header>
           <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col">
             <ThreadPrimitive.Viewport className="min-h-0 flex-1 overflow-auto px-4 py-5">
+              {initialFeedback ? (
+                <FeedbackSeedCard feedback={initialFeedback} />
+              ) : null}
               <ThreadPrimitive.Empty>
-                <div className="rounded border border-white/10 bg-white/[0.03] p-4 text-sm leading-6 text-zinc-300">
-                  Ask the agent to critique, tighten, rewrite, or brainstorm
-                  alternatives. Each proposal lands as a new version in the
-                  stack — you decide which one to save.
-                </div>
+                {initialFeedback ? null : (
+                  <div className="rounded border border-white/10 bg-white/[0.03] p-4 text-sm leading-6 text-zinc-300">
+                    Ask the agent to critique, tighten, rewrite, or brainstorm
+                    alternatives. Each proposal lands as a new version in the
+                    stack — you decide which one to save.
+                  </div>
+                )}
               </ThreadPrimitive.Empty>
               <ThreadPrimitive.Messages
                 components={{
@@ -248,6 +267,33 @@ function MessageText() {
   return (
     <div className="whitespace-pre-wrap">
       <MessagePartPrimitive.Text />
+    </div>
+  );
+}
+
+/**
+ * Opening-message card that surfaces the reviewer note the main-editor
+ * agent left on this block.
+ *
+ * Styled to match the real assistant bubbles so it reads as "this is what
+ * the agent wants you to work on". Sits above the real thread — any user
+ * reply will stack beneath it, preserving the "first message in the
+ * conversation" feel. The note itself is rendered as a quoted block so
+ * long feedback breathes instead of crowding the framing prose.
+ */
+function FeedbackSeedCard({ feedback }: { feedback: string }) {
+  return (
+    <div
+      className="mb-4 max-w-[92%] rounded border border-amber-400/30 bg-amber-500/5 px-3 py-2 text-sm leading-6 text-zinc-100"
+      data-testid="workshop-feedback-seed"
+    >
+      <p className="mb-2 text-xs font-medium uppercase tracking-[0.08em] text-amber-300">
+        From the reviewer agent
+      </p>
+      <blockquote className="mb-2 whitespace-pre-wrap border-l-2 border-amber-400/40 pl-3 text-zinc-200">
+        {feedback}
+      </blockquote>
+      <p>Want me to get started on this, or work on something else?</p>
     </div>
   );
 }

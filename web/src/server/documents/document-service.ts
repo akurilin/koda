@@ -29,6 +29,7 @@ import {
   getOrCreatePrimaryDocumentRecord,
   insertBlockAfterRecord,
   listBlockRecords,
+  setBlockFeedbackRecord,
   syncDocumentBlockRecords,
   updateBlockOrder,
   updateBlockRecord,
@@ -279,6 +280,34 @@ export async function moveBlock(input: {
       orderedBlockIds: nextBlocks.map((block) => block.id),
     }),
   };
+}
+
+/**
+ * Attach or clear the main-editor agent's freeform critique on one block.
+ *
+ * Feedback is a side-channel: it sits next to content but never changes it,
+ * does not bump `revision`, and is not consulted by the optimistic-
+ * concurrency check. Every write goes through here (the PATCH endpoint and
+ * the `setBlockFeedback` agent tool both call this) so input normalization
+ * lives in one place — whitespace is trimmed, empty strings collapse to
+ * null so "clear" is always represented the same way in the DB.
+ *
+ * Returns `null` when the block is gone or belongs to a different
+ * document; callers shape that into a 404 rather than the conflict union
+ * because there's no content revision to reconcile on.
+ */
+export async function setBlockFeedback(input: {
+  documentId: string;
+  blockId: string;
+  feedback: string | null;
+}): Promise<DocumentBlockRecord | null> {
+  const normalized =
+    typeof input.feedback === "string" ? input.feedback.trim() : null;
+  return setBlockFeedbackRecord({
+    documentId: input.documentId,
+    blockId: input.blockId,
+    feedback: normalized && normalized.length > 0 ? normalized : null,
+  });
 }
 
 /**

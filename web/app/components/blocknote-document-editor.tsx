@@ -36,6 +36,7 @@ import { createExtension } from "@blocknote/core";
 import { Plugin, PluginKey } from "prosemirror-state";
 import { useMemo } from "react";
 import { FaHammer } from "react-icons/fa";
+import { FaXmark } from "react-icons/fa6";
 import type { BlockNoteBlock } from "@/src/shared/documents";
 
 type BlockNoteDocumentEditorProps = {
@@ -57,6 +58,17 @@ type BlockNoteDocumentEditorProps = {
   // layer (see `buildLockedBlockExtension`) so typing in a locked block
   // simply produces no state change — no flicker, no revert.
   lockedToBlockId?: string;
+  // Set of block ids the reviewer agent has left feedback on. Used by
+  // the side-menu to conditionally render the "Clear feedback" (X)
+  // button alongside the hammer. Passed as a Set so membership checks
+  // don't force callers to pass the full feedback string down to the
+  // side menu — the text itself is owned by the FeedbackOverlay layer.
+  blocksWithFeedback?: ReadonlySet<string>;
+  // Invoked when the user hits the X button on a block with feedback.
+  // Paired with `blocksWithFeedback`; neither is useful without the
+  // other. The callback performs the DELETE round-trip and updates doc
+  // state upstream.
+  onClearBlockFeedback?: (blockId: string) => void;
 };
 
 export function BlockNoteDocumentEditor({
@@ -65,6 +77,8 @@ export function BlockNoteDocumentEditor({
   readOnly = false,
   onWorkshopBlock,
   lockedToBlockId,
+  blocksWithFeedback,
+  onClearBlockFeedback,
 }: BlockNoteDocumentEditorProps) {
   // BlockNote refuses to initialize with an empty block list — feed it a
   // single empty paragraph so a brand-new document still gives the user
@@ -129,6 +143,13 @@ export function BlockNoteDocumentEditor({
                   onWorkshopBlock={onWorkshopBlock}
                   lockedToBlockId={lockedToBlockId}
                 />
+                {onClearBlockFeedback && blocksWithFeedback ? (
+                  <ClearFeedbackSideMenuButton
+                    blocksWithFeedback={blocksWithFeedback}
+                    onClearFeedback={onClearBlockFeedback}
+                    lockedToBlockId={lockedToBlockId}
+                  />
+                ) : null}
               </SideMenu>
             )}
           />
@@ -252,6 +273,51 @@ function WorkshopSideMenuButton({
       icon={<FaHammer size={16} aria-hidden="true" />}
       label="Workshop this paragraph"
       onClick={() => onWorkshopBlock(block as unknown as BlockNoteBlock)}
+    />
+  );
+}
+
+/**
+ * "Clear feedback" (X) button. Rendered below the hammer and visible
+ * only on blocks the reviewer agent has left feedback on — otherwise
+ * the side-menu is one hammer wide, as before.
+ *
+ * Suppressed in workshop mode for blocks other than the locked target,
+ * matching the hammer's conditional: nothing the user can do with
+ * non-target feedback while the editor is locked to one paragraph.
+ */
+function ClearFeedbackSideMenuButton({
+  blocksWithFeedback,
+  onClearFeedback,
+  lockedToBlockId,
+}: {
+  blocksWithFeedback: ReadonlySet<string>;
+  onClearFeedback: (blockId: string) => void;
+  lockedToBlockId?: string;
+}) {
+  const Components = useComponentsContext()!;
+  const block = useExtensionState(SideMenuExtension, {
+    selector: (state) => state?.block,
+  });
+
+  if (block === undefined) {
+    return null;
+  }
+
+  if (!blocksWithFeedback.has(block.id)) {
+    return null;
+  }
+
+  if (lockedToBlockId && block.id !== lockedToBlockId) {
+    return null;
+  }
+
+  return (
+    <Components.SideMenu.Button
+      className="bn-button"
+      icon={<FaXmark size={16} aria-hidden="true" />}
+      label="Dismiss reviewer feedback"
+      onClick={() => onClearFeedback(block.id)}
     />
   );
 }

@@ -32,6 +32,7 @@ type RawBlockRow = {
   block_json: BlockNoteBlock;
   plain_text: string;
   revision: number;
+  agent_feedback: string | null;
   created_at: Date | string;
   updated_at: Date | string;
 };
@@ -267,6 +268,13 @@ export async function insertBlockAfterRecord(input: {
  * expected to turn that into a `ConflictResult` so the client can reconcile.
  * The `revision` column is incremented here so readers can tell they saw a
  * stale copy.
+ *
+ * This is also the single point where agent feedback gets cleared: any
+ * content-changing update (workshop save, agent `replaceBlock` tool call)
+ * resolves whatever feedback the reviewer agent had left on the block.
+ * Centralizing the rule here means we don't have to remember to clear it
+ * from every call site — if the block's content moved on, the old
+ * feedback is by definition stale.
  */
 export async function updateBlockRecord(input: {
   documentId: string;
@@ -280,10 +288,38 @@ export async function updateBlockRecord(input: {
       block_type = ${input.block.blockJson.type},
       block_json = ${sql.json(asJson(input.block.blockJson))},
       plain_text = ${input.block.plainText},
-      revision = revision + 1
+      revision = revision + 1,
+      agent_feedback = NULL
     WHERE id = ${input.blockId}
       AND document_id = ${input.documentId}
       AND revision = ${input.expectedRevision}
+    RETURNING *
+  `;
+
+  return row ? mapBlockRow(row) : null;
+}
+
+/**
+ * Set or clear the agent's per-block feedback.
+ *
+ * Deliberately revision-free: feedback is a side-channel, so we don't
+ * want concurrent human typing to race us out of a successful write (or
+ * vice versa). Returns the updated row so callers can surface the fresh
+ * record to the client; returns `null` if the block isn't there.
+ *
+ * Pass `null` to clear. The feedback endpoint's DELETE verb routes here
+ * with `null` so there's only one UPDATE shape to reason about.
+ */
+export async function setBlockFeedbackRecord(input: {
+  documentId: string;
+  blockId: string;
+  feedback: string | null;
+}): Promise<DocumentBlockRecord | null> {
+  const [row] = await sql<RawBlockRow[]>`
+    UPDATE document_blocks
+    SET agent_feedback = ${input.feedback}
+    WHERE id = ${input.blockId}
+      AND document_id = ${input.documentId}
     RETURNING *
   `;
 
@@ -552,6 +588,7 @@ function mapBlockRow(row: RawBlockRow): DocumentBlockRecord {
     blockJson: row.block_json,
     plainText: row.plain_text,
     revision: row.revision,
+    feedback: row.agent_feedback,
     createdAt: toIsoString(row.created_at),
     updatedAt: toIsoString(row.updated_at),
   };

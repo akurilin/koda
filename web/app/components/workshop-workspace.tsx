@@ -68,6 +68,12 @@ type WorkshopWorkspaceProps = {
   // PATCH target on save.
   targetBlock: BlockNoteBlock;
   targetBlockRevision: number;
+  // Reviewer note carried over from the main-editor agent. When non-null
+  // the assistant panel renders it as the opening message and the
+  // workshop system prompt folds it in. Captured at workshop entry and
+  // frozen for the session — the DB column is cleared on save anyway, so
+  // re-reading the latest value would fight the lifecycle rule.
+  targetBlockFeedback: string | null;
   // Called when the user hits Cancel. The workshop is destroyed; no state
   // is persisted.
   onCancel: () => void;
@@ -82,6 +88,7 @@ export function WorkshopWorkspace({
   documentBlocks,
   targetBlock,
   targetBlockRevision,
+  targetBlockFeedback,
   onCancel,
   onSaved,
 }: WorkshopWorkspaceProps) {
@@ -133,12 +140,15 @@ export function WorkshopWorkspace({
   }, []);
 
   // Keep a ref to the latest context so the chat transport's body function
-  // captures the freshest snapshot every send without re-binding.
+  // captures the freshest snapshot every send without re-binding. The
+  // carried-over reviewer feedback is frozen on the ref at mount and
+  // never updated — see the comment on `targetBlockFeedback` for why.
   const contextRef = useRef<WorkshopChatContext>({
     documentBlocks,
     targetBlockId: targetBlock.id,
     versions: versions.map((version) => blocksToInlineContent(version.blocks)),
     currentVersionIndex,
+    feedback: targetBlockFeedback,
   });
 
   useEffect(() => {
@@ -149,8 +159,15 @@ export function WorkshopWorkspace({
         blocksToInlineContent(version.blocks),
       ),
       currentVersionIndex,
+      feedback: targetBlockFeedback,
     };
-  }, [documentBlocks, targetBlock.id, versions, currentVersionIndex]);
+  }, [
+    documentBlocks,
+    targetBlock.id,
+    versions,
+    currentVersionIndex,
+    targetBlockFeedback,
+  ]);
 
   const currentVersion = versions[currentVersionIndex];
 
@@ -576,6 +593,7 @@ export function WorkshopWorkspace({
         <WorkshopAssistantPanel
           contextRef={contextRef}
           onProposedRewrite={handleProposedRewrite}
+          initialFeedback={targetBlockFeedback}
         />
       </aside>
       {consolidateDialogOpen ? (
