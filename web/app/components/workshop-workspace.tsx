@@ -203,10 +203,7 @@ export function WorkshopWorkspace({
     if (!pane) {
       return;
     }
-    const escapedId =
-      typeof CSS !== "undefined" && "escape" in CSS
-        ? CSS.escape(targetBlock.id)
-        : targetBlock.id;
+    const escapedId = escapeForAttributeSelector(targetBlock.id);
     const selector = `[data-node-type="blockOuter"][data-id="${escapedId}"]`;
 
     const tryScroll = () => {
@@ -962,15 +959,10 @@ function versionToPlainText(version: Version): string {
  * Rendered inline because the target id is only known at runtime — a
  * static stylesheet can't do "not equal to this specific UUID". Escaping
  * defends against ids that ever stop being plain alphanumeric (DB ids
- * today are UUIDs, but the extra line is cheap). The workshop route is
- * client-only (`ssr: false`), so CSS.escape is available when this
- * renders.
+ * today are UUIDs, but the extra line is cheap).
  */
 function ContextLockStyles({ targetBlockId }: { targetBlockId: string }) {
-  const escapedId =
-    typeof CSS !== "undefined" && "escape" in CSS
-      ? CSS.escape(targetBlockId)
-      : targetBlockId;
+  const escapedId = escapeForAttributeSelector(targetBlockId);
   const css = `
     [data-testid="workshop-editor-pane"] [data-node-type="blockOuter"]:not([data-id="${escapedId}"]) {
       opacity: 0.35;
@@ -1065,10 +1057,7 @@ function ProposalFlash({
     if (!pane) {
       return;
     }
-    const escapedId =
-      typeof CSS !== "undefined" && "escape" in CSS
-        ? CSS.escape(targetBlockId)
-        : targetBlockId;
+    const escapedId = escapeForAttributeSelector(targetBlockId);
     // `.bn-inline-content` is BlockNote's internal wrapper around the
     // actual text runs. Measuring it (instead of the blockOuter) gives us
     // the correct text box — the blockOuter includes side-menu gutter
@@ -1216,3 +1205,14 @@ const FLASH_KEYFRAMES = `
     animation: workshop-flash-add 900ms ease-out both;
   }
 `;
+
+// Escape a value for use inside a CSS attribute-value selector like
+// `[data-id="..."]`. Only `"` and `\` need escaping; leading digits
+// (valid inside attribute values, invalid inside CSS identifiers) must
+// be left alone. We deliberately don't call the browser's
+// `CSS.escape()`: it's identifier-focused and over-escapes, which
+// would cause SSR/CSR mismatches when this tree eventually gets rendered
+// outside the current workshop-only pages.
+function escapeForAttributeSelector(value: string): string {
+  return value.replace(/["\\]/g, "\\$&");
+}

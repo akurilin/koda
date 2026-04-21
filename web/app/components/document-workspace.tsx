@@ -752,15 +752,20 @@ function DocumentWorkspaceInner({
   );
 }
 
-// Defensive selector-escape for a block id when building the DOM query.
-// Block ids are UUIDs today so escaping is mostly a no-op, but the
-// fallback keeps us safe if the id format ever widens (e.g. agent-minted
-// ids that include colons or dots, which would otherwise blow up an
-// attribute-selector parser).
+// Escape a value for use inside a CSS attribute-value selector like
+// `[data-id="..."]`. Only `"` and `\` are meaningful inside the quoted
+// value; everything else (including leading digits, which would trip
+// CSS-identifier escaping) is fine verbatim.
+//
+// Intentionally does NOT call the browser's `CSS.escape()`: that
+// function escapes for CSS *identifier* contexts and, when asked to
+// escape a UUID-shaped string, prepends `\39 ` to escape the leading
+// digit. That's harmless in the browser but the server (where `CSS`
+// is undefined) would render the raw string, so SSR and client HTML
+// would disagree and React would flag a hydration mismatch. Keeping
+// this deterministic across environments avoids that whole class of
+// bug.
 function cssEscape(value: string): string {
-  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
-    return CSS.escape(value);
-  }
   return value.replace(/["\\]/g, "\\$&");
 }
 
