@@ -17,7 +17,6 @@
     "test:e2e": "npm --prefix web run test:e2e"
   },
   "engines": {
-    "node": "24.15.0",
-    "npm": "11.12.1"
+    "node": "24.x"
   }
 }

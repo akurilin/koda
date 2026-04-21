@@ -11,9 +11,11 @@ notices.
 
 - Use the Node.js version pinned in the root `.nvmrc`.
 - Run `nvm use` from the repository root before working with Node tooling.
-- npm engine checks are strict via the root `.npmrc`; package folders should
-  symlink their local `.npmrc` to it so installs fail when the active Node/npm
-  versions do not match package `engines`.
+- `package.json` `engines` pins only the Node major (`24.x`) because Vercel
+  selects Node by major version and cannot honor patch-level pins. Exact
+  Node/npm versions come from `.nvmrc` + `nvm use` locally.
+- npm engine checks stay strict via the root `.npmrc`; package folders should
+  symlink their local `.npmrc` to it so installs fail on major-version drift.
 
 ## Development Workflow
 
