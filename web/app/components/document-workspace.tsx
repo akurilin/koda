@@ -28,7 +28,14 @@
 
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { AssistantRuntimeProvider, useAuiState } from "@assistant-ui/react";
 import {
   AssistantChatTransport,
@@ -111,15 +118,44 @@ function DocumentWorkspaceInner({
   const router = useRouter();
   const searchParams = useSearchParams();
   // `?focus=<blockId>` is set when navigating back from a workshop (save
-  // or cancel). We use it to scroll the editor to the workshopped block
+  // or cancel). We use it to position the editor on the workshopped block
   // so the user doesn't lose context — see the focus effect below.
   const focusBlockId = searchParams.get("focus");
+  // `?scrollY=<number>` is captured at workshop entry and carried on
+  // every URL in the workshop round-trip so we can restore the exact
+  // scroll position the user left, instead of snapping the block to the
+  // top of the viewport. Preserving a precise number in the URL keeps
+  // back-button navigation and reload on the workshop route producing
+  // the same landing view.
+  const scrollYParam = searchParams.get("scrollY");
   // `thread.isRunning` flips true the instant the user submits a chat and
   // stays true until the last stream token / tool call settles. We use it as
   // the single source of truth for "the agent is writing; humans stand down".
   // `?? false` covers the fleeting moment before the store is populated.
   const isAgentRunning =
     useAuiState((state) => state.thread.isRunning) ?? false;
+
+  // Ref on the editor's scroll container. We need direct DOM access
+  // because the scroll position we round-trip through the URL is this
+  // element's `scrollTop`, not `window.scrollY` (the page itself never
+  // scrolls — only the inner pane does).
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // When a scrollY is carried in the URL we keep the editor pane hidden
+  // until we've mounted the target block and set `scrollTop`. Without
+  // this, the user sees a one-frame flash of the editor at the top of
+  // the document before the restoration fires — very noticeable when
+  // returning from a workshop near the bottom of a long article. The
+  // initial value is derived synchronously so the first paint already
+  // has the pane hidden; we flip it back to visible at the same time
+  // as the scrollTop assignment. The workshop entry/exit transitions
+  // both cross a Next.js page boundary (`/documents/[id]` vs
+  // `/documents/[id]/workshop/[blockId]`), so `DocumentWorkspace`
+  // unmounts and remounts — the `useState` initializer alone covers
+  // every case; no in-place rearm is needed.
+  const [awaitingScrollRestore, setAwaitingScrollRestore] = useState(
+    () => focusBlockId !== null && scrollYParam !== null,
+  );
 
   const [document, setDocument] = useState(initialDocument);
   const [editorVersion, setEditorVersion] = useState(0);
@@ -380,6 +416,20 @@ function DocumentWorkspaceInner({
         window.clearTimeout(saveTimer.current);
         saveTimer.current = null;
       }
+      // Capture the editor pane's scroll position so we can restore it
+      // verbatim when the user returns from the workshop. Embedding this
+      // in the URL (rather than stashing it in memory) means reload and
+      // back-button navigation from the workshop both land the user on
+      // exactly the scroll offset they left.
+      //
+      // We always emit `scrollY`, even when it's 0. Previously we
+      // skipped it for a "cleaner URL" at the top of the doc, but that
+      // dropped the return path into the `scrollIntoView` fallback,
+      // which aligns the focused block to the top of the viewport and
+      // pushes the article's hero above it — a visibly wrong result
+      // when the user was already at `scrollTop=0`.
+      const scrollTop = Math.round(scrollContainerRef.current?.scrollTop ?? 0);
+      const scrollQuery = `&scrollY=${scrollTop}`;
       // Rewrite the current history entry to point at the block we're
       // about to workshop before pushing the workshop URL. That way the
       // browser back button from inside the workshop lands on a main-doc
@@ -388,9 +438,15 @@ function DocumentWorkspaceInner({
       // `window.history.replaceState` directly instead of
       // `router.replace` avoids an unnecessary render cycle, since the
       // very next action is a push away from this URL anyway.
-      const backTargetUrl = `/documents/${document.id}?focus=${encodeURIComponent(block.id)}`;
+      const backTargetUrl = `/documents/${document.id}?focus=${encodeURIComponent(block.id)}${scrollQuery}`;
       window.history.replaceState(null, "", backTargetUrl);
-      router.push(`/documents/${document.id}/workshop/${block.id}`);
+      // Carry `scrollY` on the workshop URL too (same reasoning as
+      // above: emit 0 explicitly) so Save/Cancel, which read from
+      // `searchParams`, can round-trip the number back onto the main-
+      // doc URL without falling into the `scrollIntoView` fallback.
+      router.push(
+        `/documents/${document.id}/workshop/${block.id}?scrollY=${scrollTop}`,
+      );
     },
     [document.id, router],
   );
@@ -406,15 +462,19 @@ function DocumentWorkspaceInner({
 
   // Both save and cancel return to the main doc URL and hand it a
   // `?focus=<blockId>` query param. The destination effect (below) picks
-  // that up and scrolls the editor to the block so the user lands right
-  // where they were, not at the top of the document.
+  // that up and positions the editor so the user lands right where they
+  // were, not at the top of the document. We also forward the `scrollY`
+  // captured at workshop entry (it rides on the workshop URL) so the
+  // return restores the exact scroll offset, not just the block.
   const returnToMainDoc = useCallback(
     (blockId: string) => {
+      const savedScrollY = searchParams.get("scrollY");
+      const scrollQuery = savedScrollY ? `&scrollY=${savedScrollY}` : "";
       router.push(
-        `/documents/${document.id}?focus=${encodeURIComponent(blockId)}`,
+        `/documents/${document.id}?focus=${encodeURIComponent(blockId)}${scrollQuery}`,
       );
     },
-    [document.id, router],
+    [document.id, router, searchParams],
   );
 
   // When the workshop saves, merge the updated block back into the main
@@ -444,34 +504,78 @@ function DocumentWorkspaceInner({
     [returnToMainDoc],
   );
 
-  // Scroll the focused block into view when the main doc re-mounts. We
-  // poll briefly because the dynamic BlockNote editor mounts after the
-  // Next.js shell renders — the element we're looking for may not exist
-  // on the first tick. The retry loop bails quickly if the block never
-  // shows up (stale `focus` param from a deleted block, for instance).
-  useEffect(() => {
+  // Restore the user's view when the main doc re-mounts after a
+  // workshop round-trip. We watch the scroll container with a
+  // `MutationObserver` so the restore fires on the same frame the
+  // BlockNote editor inserts the target block — far faster than the
+  // old 100ms polling loop, which left a visible flash at scrollTop=0.
+  // Paired with `useLayoutEffect`, the scrollTop assignment and the
+  // reveal (`setAwaitingScrollRestore(false)`) happen before the next
+  // paint, so the user sees one frame with the editor already at the
+  // saved offset rather than a snap from top.
+  //
+  // Behavior is intentionally non-animated: a smooth scroll after every
+  // workshop save gets old fast. When a `scrollY` is carried in the
+  // URL we restore it exactly; otherwise we fall back to snapping the
+  // block into view (also instant) so the `?focus=` URL remains useful
+  // when linked to directly without a scroll offset.
+  useLayoutEffect(() => {
     if (workshopTarget || !focusBlockId) {
       return;
     }
-    let attempts = 0;
-    const interval = window.setInterval(() => {
-      attempts += 1;
-      const element = window.document.querySelector(
+    const container = scrollContainerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const tryRestore = () => {
+      const element = container.querySelector(
         `[data-id="${cssEscape(focusBlockId)}"]`,
       );
-      if (element) {
-        window.clearInterval(interval);
-        element.scrollIntoView({ behavior: "smooth", block: "start" });
-        return;
+      if (!element) {
+        return false;
       }
-      if (attempts > 20) {
-        window.clearInterval(interval);
+      const parsedScrollY =
+        scrollYParam !== null ? Number.parseInt(scrollYParam, 10) : NaN;
+      if (Number.isFinite(parsedScrollY)) {
+        // Touching `scrollHeight` forces a synchronous layout so the
+        // container knows its real scrollable size before we assign
+        // `scrollTop`. Without this, an early assignment right after
+        // DOM insertion can be clamped by a stale scrollHeight.
+        void container.scrollHeight;
+        container.scrollTop = parsedScrollY;
+      } else {
+        element.scrollIntoView({ block: "start" });
       }
-    }, 100);
-    return () => {
-      window.clearInterval(interval);
+      setAwaitingScrollRestore(false);
+      return true;
     };
-  }, [focusBlockId, workshopTarget, editorVersion]);
+
+    if (tryRestore()) {
+      return;
+    }
+
+    const observer = new MutationObserver(() => {
+      if (tryRestore()) {
+        observer.disconnect();
+      }
+    });
+    observer.observe(container, { childList: true, subtree: true });
+
+    // Safety net: if the target block never appears (e.g. a stale
+    // `focus` id pointing at a deleted block), reveal the pane anyway
+    // so the user isn't stuck staring at a blank area. A short budget
+    // keeps the worst-case hidden window tight.
+    const revealTimeout = window.setTimeout(() => {
+      observer.disconnect();
+      setAwaitingScrollRestore(false);
+    }, 1_000);
+
+    return () => {
+      observer.disconnect();
+      window.clearTimeout(revealTimeout);
+    };
+  }, [focusBlockId, scrollYParam, workshopTarget, editorVersion]);
 
   if (workshopTarget) {
     return (
@@ -517,11 +621,16 @@ function DocumentWorkspaceInner({
           </div>
         </header>
         <div
+          ref={scrollContainerRef}
           className={`min-h-0 flex-1 overflow-auto transition-opacity ${
             isAgentRunning ? "opacity-75" : ""
           }`}
           data-testid="editor-pane"
           data-editor-locked={isAgentRunning ? "true" : "false"}
+          // Suppress the brief mount-at-top frame when restoring scroll
+          // from the URL — the pane only becomes visible after the
+          // layout effect has set `scrollTop`.
+          style={awaitingScrollRestore ? { visibility: "hidden" } : undefined}
         >
           <BlockNoteDocumentEditor
             key={editorVersion}
