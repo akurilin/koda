@@ -1,7 +1,10 @@
 # Project Guidance
 
-This is a monorepo Git repository. The Next.js codebase lives under the
-`web/` subfolder in this directory.
+This is a monorepo Git repository. The Next.js codebase lives under `web/`,
+the Postgres schema lives under `supabase/`, and longer-form design notes
+live in `docs/`. This file is the single source of truth for working rules
+across the whole repo; `AGENTS.md` at the root is a symlink to it so tooling
+that looks for either filename stays in sync.
 
 ## Web App
 
@@ -10,6 +13,10 @@ This is a monorepo Git repository. The Next.js codebase lives under the
 - Language: TypeScript
 - Styling: Tailwind CSS
 - Package manager: npm
+- **This is NOT the Next.js you know.** This version has breaking changes
+  — APIs, conventions, and file structure may all differ from your
+  training data. Read the relevant guide in `web/node_modules/next/dist/docs/`
+  before writing any code. Heed deprecation notices.
 
 ## Runtime
 
@@ -30,6 +37,29 @@ This is a monorepo Git repository. The Next.js codebase lives under the
   Prettier, `tsc --noEmit`, `shellcheck`, `gitleaks`, and `squawk` (Postgres
   migration safety). Install once with `pre-commit install` from the repo root.
   Do not bypass the hooks with `--no-verify`; fix the underlying issue instead.
+
+## Database and migrations
+
+- Use standard Supabase for local and production Postgres workflows.
+- Manage schema changes through Supabase migrations in `supabase/migrations/`;
+  do not introduce a separate migration tracker unless explicitly requested.
+- Create and apply Supabase migrations with the Supabase CLI. Do not
+  hand-apply migration SQL directly to local or remote databases, because
+  that bypasses Supabase's migration tracking.
+- The Supabase CLI is not installed on `PATH`. Invoke it via
+  `npx supabase ...` (e.g. `npx supabase migration new <name>`,
+  `npx supabase migration up`). Run from the repo root so it finds
+  `supabase/config.toml`.
+- Follow PostgreSQL's documented SQL identifier conventions: use unquoted,
+  lower-case identifiers with underscores for tables, columns, indexes,
+  constraints, functions, and schemas.
+- Write SQL key words in upper case and database object names in lower case,
+  matching the convention shown in the PostgreSQL lexical structure
+  documentation.
+- Avoid quoted identifiers for application schema objects. Quoted identifiers
+  are case-sensitive in PostgreSQL, while unquoted identifiers are folded to
+  lower case.
+- Keep identifiers within PostgreSQL's default 63-byte identifier length limit.
 
 ## Validating UI changes
 

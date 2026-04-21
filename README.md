@@ -240,8 +240,7 @@ Longer-form write-ups live in [`docs/`](docs/):
 
 - [`docs/agentic-editor-plan.md`](docs/agentic-editor-plan.md) — the
   original product brief and architectural sketch this repo implements.
-- [`CLAUDE.md`](CLAUDE.md) — working rules for humans and AI
-  collaborators on this codebase: runtime pins, the pre-commit gate,
-  documentation expectations.
-- [`web/AGENTS.md`](web/AGENTS.md) — Supabase migration conventions and
-  the SQL identifier rules enforced throughout the codebase.
+- [`CLAUDE.md`](CLAUDE.md) — single source of truth for working rules on
+  this codebase: runtime pins, the pre-commit gate, Supabase migration
+  conventions, SQL identifier rules, and documentation expectations. The
+  root `AGENTS.md` is a symlink to this file.
