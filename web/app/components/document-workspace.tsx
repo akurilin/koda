@@ -45,7 +45,6 @@ import {
 } from "@assistant-ui/react-ai-sdk";
 import { AssistantPanel } from "./assistant-panel";
 import { buildDemoArticleBlocks } from "./demo-article";
-import { FeedbackOverlays } from "./feedback-overlay";
 import { WorkshopWorkspace } from "./workshop-workspace";
 import type {
   BlockNoteBlock,
@@ -205,20 +204,21 @@ function DocumentWorkspaceInner({
     [document.blocks],
   );
 
-  // Set of block ids with active reviewer feedback, threaded into the
-  // editor so the side-menu can conditionally render the "Clear
-  // feedback" (X) button. Empty strings count as "no feedback" —
-  // matches the service-layer normalization so the UI and DB stay in
-  // lock-step about what "has feedback" means.
-  const blocksWithFeedback = useMemo(
-    () =>
-      new Set(
-        document.blocks
-          .filter((block) => block.feedback && block.feedback.length > 0)
-          .map((block) => block.id),
-      ),
-    [document.blocks],
-  );
+  // Map of block id → feedback text for blocks with an active reviewer
+  // note. Threaded into the editor so the side-menu can (a) render the
+  // hover popover showing the feedback text on the question-mark button
+  // and (b) render the "Clear feedback" (X) button alongside. Empty
+  // strings count as "no feedback" — matches the service-layer
+  // normalization so the UI and DB stay in lock-step.
+  const blockFeedback = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const block of document.blocks) {
+      if (block.feedback && block.feedback.length > 0) {
+        map.set(block.id, block.feedback);
+      }
+    }
+    return map;
+  }, [document.blocks]);
 
   // X-button handler. The feedback endpoint returns the updated block
   // so we can merge it into state without a full refetch — keeps the
@@ -682,22 +682,23 @@ function DocumentWorkspaceInner({
           // layout effect has set `scrollTop`.
           style={awaitingScrollRestore ? { visibility: "hidden" } : undefined}
         >
-          {/* Feedback overlays are absolutely positioned inside the
-              scroll container so they ride along as the user scrolls.
-              Rendered before the editor so they sit in z-order below
-              it for selection / caret interactions but above for
-              hover (z-20 on the popover). */}
-          <FeedbackOverlays
-            containerRef={scrollContainerRef}
-            blocks={document.blocks}
-          />
+          {/* Paint a faint amber background on every block that has
+              reviewer feedback. We inject the rules as a <style> tag
+              keyed on each block id so we don't need to touch
+              BlockNote's DOM — the editor owns the blocks, we just
+              decorate them. `blockOuter` is the stable wrapper that
+              carries `data-id`; targeting it (rather than the inner
+              `blockContent`) colors the full block including its side
+              padding, which reads as "this whole paragraph has a
+              comment on it". */}
+          <FeedbackHighlightStyles blockIds={[...blockFeedback.keys()]} />
           <BlockNoteDocumentEditor
             key={editorVersion}
             initialBlocks={editorBlocks}
             onChange={handleEditorChange}
             readOnly={isAgentRunning}
             onWorkshopBlock={enterWorkshop}
-            blocksWithFeedback={blocksWithFeedback}
+            blockFeedback={blockFeedback}
             onClearBlockFeedback={clearBlockFeedback}
           />
         </div>
@@ -761,4 +762,31 @@ function cssEscape(value: string): string {
     return CSS.escape(value);
   }
   return value.replace(/["\\]/g, "\\$&");
+}
+
+/**
+ * Render a `<style>` element with one rule per feedback-annotated block
+ * id, painting each block's `blockOuter` wrapper with a faint amber
+ * background. Using CSS injection (instead of mutating block JSON or
+ * wrapping blocks in a React overlay) keeps the integration one-way —
+ * the editor owns the DOM, we only decorate it via attribute-selector
+ * styling. An empty list renders nothing.
+ */
+function FeedbackHighlightStyles({ blockIds }: { blockIds: string[] }) {
+  if (blockIds.length === 0) {
+    return null;
+  }
+  // `.bn-block-content` is BlockNote's class on the inner content box
+  // (the actual `<p>` / `<h1>` / list-item wrapper). Targeting that
+  // rather than `blockOuter` keeps the highlight tight to the prose
+  // instead of flooding the gutter where the side-menu lives.
+  const selectors = blockIds
+    .map(
+      (id) =>
+        `[data-node-type="blockOuter"][data-id="${cssEscape(id)}"] .bn-block-content`,
+    )
+    .join(",\n");
+  return (
+    <style>{`${selectors} { background-color: rgba(253, 224, 71, 0.22); border-radius: 4px; }`}</style>
+  );
 }
