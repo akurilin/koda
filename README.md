@@ -128,7 +128,10 @@ Runtime stack:
   stack at `postgresql://postgres:postgres@127.0.0.1:54322/postgres`).
 
 The file is gitignored. A typical local setup only needs `ANTHROPIC_API_KEY`;
-everything else has sensible defaults tuned for `npx supabase start`.
+everything else has sensible defaults tuned for `npx supabase start`. See
+[`web/.env.example`](web/.env.example) for the full list of variables with
+inline documentation — copy it to `web/.env.local` and fill in the required
+values.
 
 ## Getting started
 
@@ -145,8 +148,9 @@ npm --prefix web install
 npx supabase start
 npx supabase migration up
 
-# 3. Add your Anthropic API key so the assistant can respond.
-echo 'ANTHROPIC_API_KEY=sk-ant-...' > web/.env.local
+# 3. Copy the env template and add your Anthropic API key.
+cp web/.env.example web/.env.local
+# then edit web/.env.local and set ANTHROPIC_API_KEY=sk-ant-...
 
 # 4. Install the pre-commit hook so local commits run the same gate as CI.
 pre-commit install
