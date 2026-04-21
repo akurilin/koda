@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AssistantPanel } from "./assistant-panel";
+import { buildDemoArticleBlocks } from "./demo-article";
 import {
   BlockNoteBlock,
   DocumentBlockRecord,
@@ -34,6 +35,8 @@ export function DocumentWorkspace({ initialDocument }: DocumentWorkspaceProps) {
   const [saveState, setSaveState] = useState<"saved" | "saving" | "conflict">(
     "saved",
   );
+  const [demoDialogOpen, setDemoDialogOpen] = useState(false);
+  const [demoBusy, setDemoBusy] = useState(false);
   const documentRef = useRef(initialDocument);
   const lastEditorSnapshot = useRef(
     JSON.stringify(initialDocument.blocks.map((block) => block.blockJson)),
@@ -147,6 +150,52 @@ export function DocumentWorkspace({ initialDocument }: DocumentWorkspaceProps) {
     [syncBlocks],
   );
 
+  const applyDemoArticle = useCallback(async () => {
+    if (saveTimer.current) {
+      window.clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+
+    setDemoBusy(true);
+    setSaveState("saving");
+
+    const demoBlocks = buildDemoArticleBlocks();
+
+    const response = await fetch(
+      `/api/documents/${documentRef.current.id}/blocks/sync`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          blocks: demoBlocks,
+          expectedRevisions: revisionMap,
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      setSaveState("conflict");
+      setDemoBusy(false);
+      await refreshDocument();
+      return;
+    }
+
+    const body = (await response.json()) as { blocks: DocumentBlockRecord[] };
+    const nextSnapshot = JSON.stringify(
+      body.blocks.map((block) => block.blockJson),
+    );
+
+    lastEditorSnapshot.current = nextSnapshot;
+    setDocument((currentDocument) => ({
+      ...currentDocument,
+      blocks: body.blocks,
+    }));
+    setEditorVersion((version) => version + 1);
+    setSaveState("saved");
+    setDemoBusy(false);
+    setDemoDialogOpen(false);
+  }, [refreshDocument, revisionMap]);
+
   useEffect(() => {
     return () => {
       if (saveTimer.current) {
@@ -167,15 +216,26 @@ export function DocumentWorkspace({ initialDocument }: DocumentWorkspaceProps) {
               {document.title || "Untitled article"}
             </h1>
           </div>
-          <div
-            className="rounded border border-zinc-200 px-2 py-1 text-xs text-zinc-500"
-            data-testid="save-state"
-          >
-            {saveState === "saving"
-              ? "Saving"
-              : saveState === "conflict"
-                ? "Conflict"
-                : "Saved"}
+          <div className="flex items-center gap-2">
+            <div
+              className="rounded border border-zinc-200 px-2 py-1 text-xs text-zinc-500"
+              data-testid="save-state"
+            >
+              {saveState === "saving"
+                ? "Saving"
+                : saveState === "conflict"
+                  ? "Conflict"
+                  : "Saved"}
+            </div>
+            <button
+              type="button"
+              onClick={() => setDemoDialogOpen(true)}
+              disabled={demoBusy}
+              className="rounded border border-zinc-200 px-2 py-1 text-xs text-zinc-600 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+              data-testid="demo-text-button"
+            >
+              Demo text
+            </button>
           </div>
         </header>
         <div className="min-h-0 flex-1 overflow-auto" data-testid="editor-pane">
@@ -192,6 +252,48 @@ export function DocumentWorkspace({ initialDocument }: DocumentWorkspaceProps) {
           onRefreshDocument={refreshDocument}
         />
       </aside>
+      {demoDialogOpen ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="demo-dialog-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/40 px-4"
+        >
+          <div className="w-full max-w-md rounded-lg bg-white p-6 text-zinc-950 shadow-xl">
+            <h2
+              id="demo-dialog-title"
+              className="text-base font-semibold"
+              data-testid="demo-dialog-title"
+            >
+              Replace document with demo text?
+            </h2>
+            <p className="mt-2 text-sm text-zinc-600">
+              This deletes every block in the current document and replaces it
+              with a preset article. Your existing content will be lost.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDemoDialogOpen(false)}
+                disabled={demoBusy}
+                className="rounded border border-zinc-200 px-3 py-1.5 text-sm text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                data-testid="demo-dialog-cancel"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void applyDemoArticle()}
+                disabled={demoBusy}
+                className="rounded bg-zinc-950 px-3 py-1.5 text-sm text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+                data-testid="demo-dialog-confirm"
+              >
+                {demoBusy ? "Replacing..." : "Replace"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

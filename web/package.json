@@ -16,7 +16,7 @@
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
-    "test:e2e": "next build && PLAYWRIGHT_PORT=$(node scripts/random-qa-port.mjs) playwright test tests/e2e/manual-editor.spec.ts",
+    "test:e2e": "next build && PLAYWRIGHT_PORT=$(node scripts/random-qa-port.mjs) playwright test tests/e2e",
     "test:e2e:agent": "next build && PLAYWRIGHT_PORT=$(node scripts/random-qa-port.mjs) RUN_AGENT_QA=true playwright test tests/e2e/agent-edit.spec.ts"
   },
   "dependencies": {
