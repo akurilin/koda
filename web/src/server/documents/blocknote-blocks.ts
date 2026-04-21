@@ -133,6 +133,25 @@ export function validateBlock(block: unknown): asserts block is BlockNoteBlock {
 }
 
 /**
+ * Validate an untrusted inline-content payload and return a clean
+ * `InlineContent[]`. Stricter than `normalizeInlineContent` in that it
+ * rejects the bare-string shorthand — workshop rewrites always come through
+ * as structured arrays so callers can't smuggle plain text past the format.
+ */
+export function normalizeInlineContentArray(content: unknown): InlineContent[] {
+  if (!Array.isArray(content)) {
+    throw new Error("Inline content must be an array.");
+  }
+
+  const normalized = normalizeInlineContent(content);
+  if (typeof normalized === "string") {
+    throw new Error("Inline content must be an array, not a string.");
+  }
+
+  return normalized;
+}
+
+/**
  * Stable-sort helper for rows that come out of the DB in arbitrary order.
  * Exported as a utility for tests and any ad-hoc tooling that reconstructs a
  * document from raw rows.
@@ -167,10 +186,19 @@ function inlineContentToPlainText(content: BlockNoteBlock["content"]): string {
     .join("");
 }
 
-// Accepts both the string form ("legacy" BlockNote shorthand) and the
-// structured array form, then always emits the array form. Storing one shape
-// simplifies every downstream consumer.
-function normalizeInlineContent(content: unknown): string | InlineContent[] {
+/**
+ * Coerce an untrusted value into the inline-content array shape the rest of
+ * the system expects. Used both inside `normalizeBlock` and by the workshop
+ * chat route, which validates the agent's `proposeRewrite` payloads before
+ * echoing them back to the client.
+ *
+ * Accepts both the string form ("legacy" BlockNote shorthand) and the
+ * structured array form, and always emits the array form so downstream
+ * consumers only ever handle one shape.
+ */
+export function normalizeInlineContent(
+  content: unknown,
+): string | InlineContent[] {
   if (content === undefined || content === null) {
     return [];
   }

@@ -27,6 +27,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AssistantRuntimeProvider, useAuiState } from "@assistant-ui/react";
 import {
@@ -35,6 +36,7 @@ import {
 } from "@assistant-ui/react-ai-sdk";
 import { AssistantPanel } from "./assistant-panel";
 import { buildDemoArticleBlocks } from "./demo-article";
+import { WorkshopWorkspace } from "./workshop-workspace";
 import type {
   BlockNoteBlock,
   DocumentBlockRecord,
@@ -61,6 +63,11 @@ const BlockNoteDocumentEditor = dynamic(
 
 type DocumentWorkspaceProps = {
   initialDocument: DocumentWithBlocks;
+  // Present on the workshop route (`/documents/:id/workshop/:blockId`).
+  // When set, this component renders `WorkshopWorkspace` instead of the
+  // main editor — the URL is the source of truth for "is a workshop
+  // open?", so back-button / reload / sharing all line up.
+  workshopBlockId?: string;
 };
 
 /**
@@ -71,7 +78,10 @@ type DocumentWorkspaceProps = {
  * Everything interactive lives in `DocumentWorkspaceInner` — it has to sit
  * under `AssistantRuntimeProvider` for `useAuiState` to resolve.
  */
-export function DocumentWorkspace({ initialDocument }: DocumentWorkspaceProps) {
+export function DocumentWorkspace({
+  initialDocument,
+  workshopBlockId,
+}: DocumentWorkspaceProps) {
   // `useMemo` keeps the transport instance stable across renders so the
   // runtime doesn't rebuild its internal state every time the parent
   // re-renders.
@@ -86,12 +96,24 @@ export function DocumentWorkspace({ initialDocument }: DocumentWorkspaceProps) {
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <DocumentWorkspaceInner initialDocument={initialDocument} />
+      <DocumentWorkspaceInner
+        initialDocument={initialDocument}
+        workshopBlockId={workshopBlockId}
+      />
     </AssistantRuntimeProvider>
   );
 }
 
-function DocumentWorkspaceInner({ initialDocument }: DocumentWorkspaceProps) {
+function DocumentWorkspaceInner({
+  initialDocument,
+  workshopBlockId,
+}: DocumentWorkspaceProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  // `?focus=<blockId>` is set when navigating back from a workshop (save
+  // or cancel). We use it to scroll the editor to the workshopped block
+  // so the user doesn't lose context — see the focus effect below.
+  const focusBlockId = searchParams.get("focus");
   // `thread.isRunning` flips true the instant the user submits a chat and
   // stays true until the last stream token / tool call settles. We use it as
   // the single source of truth for "the agent is writing; humans stand down".
@@ -345,6 +367,115 @@ function DocumentWorkspaceInner({ initialDocument }: DocumentWorkspaceProps) {
     };
   }, []);
 
+  // Side-menu entry point into workshop mode. Navigation goes through the
+  // router so the workshop identity lives in the URL (see plan doc and
+  // `workshop/[blockId]/page.tsx`). Internal state is not used — back /
+  // reload / sharing all resolve from the URL alone.
+  const enterWorkshop = useCallback(
+    (block: BlockNoteBlock) => {
+      // Commit any pending autosave so the block we're about to workshop
+      // matches the server's view (and so we don't race a save into the
+      // unmount that the workshop transition causes).
+      if (saveTimer.current) {
+        window.clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
+      router.push(`/documents/${document.id}/workshop/${block.id}`);
+    },
+    [document.id, router],
+  );
+
+  const workshopTarget = useMemo(
+    () =>
+      workshopBlockId
+        ? (document.blocks.find((block) => block.id === workshopBlockId) ??
+          null)
+        : null,
+    [workshopBlockId, document.blocks],
+  );
+
+  // Both save and cancel return to the main doc URL and hand it a
+  // `?focus=<blockId>` query param. The destination effect (below) picks
+  // that up and scrolls the editor to the block so the user lands right
+  // where they were, not at the top of the document.
+  const returnToMainDoc = useCallback(
+    (blockId: string) => {
+      router.push(
+        `/documents/${document.id}?focus=${encodeURIComponent(blockId)}`,
+      );
+    },
+    [document.id, router],
+  );
+
+  // When the workshop saves, merge the updated block back into the main
+  // doc state so the user returns to an already-fresh view without a poll.
+  const handleWorkshopSaved = useCallback(
+    (updatedBlock: DocumentBlockRecord) => {
+      setDocument((current) => ({
+        ...current,
+        blocks: current.blocks.map((block) =>
+          block.id === updatedBlock.id ? updatedBlock : block,
+        ),
+      }));
+      // Make sure the next background poll sees the updated content as
+      // "current" and doesn't trigger a spurious editor remount.
+      lastEditorSnapshot.current = JSON.stringify(
+        documentRef.current.blocks.map((block) =>
+          block.id === updatedBlock.id
+            ? updatedBlock.blockJson
+            : block.blockJson,
+        ),
+      );
+      // Bump editor version so BlockNote re-reads the updated block on
+      // return to the main doc.
+      setEditorVersion((version) => version + 1);
+      returnToMainDoc(updatedBlock.id);
+    },
+    [returnToMainDoc],
+  );
+
+  // Scroll the focused block into view when the main doc re-mounts. We
+  // poll briefly because the dynamic BlockNote editor mounts after the
+  // Next.js shell renders — the element we're looking for may not exist
+  // on the first tick. The retry loop bails quickly if the block never
+  // shows up (stale `focus` param from a deleted block, for instance).
+  useEffect(() => {
+    if (workshopTarget || !focusBlockId) {
+      return;
+    }
+    let attempts = 0;
+    const interval = window.setInterval(() => {
+      attempts += 1;
+      const element = window.document.querySelector(
+        `[data-id="${cssEscape(focusBlockId)}"]`,
+      );
+      if (element) {
+        window.clearInterval(interval);
+        element.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+      if (attempts > 20) {
+        window.clearInterval(interval);
+      }
+    }, 100);
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [focusBlockId, workshopTarget, editorVersion]);
+
+  if (workshopTarget) {
+    return (
+      <WorkshopWorkspace
+        documentId={document.id}
+        documentBlocks={document.blocks.map((block) => block.blockJson)}
+        targetBlock={workshopTarget.blockJson}
+        targetBlockRevision={workshopTarget.revision}
+        onCancel={() => returnToMainDoc(workshopTarget.id)}
+        onSaved={handleWorkshopSaved}
+      />
+    );
+  }
+
   return (
     <main className="flex h-screen min-h-0 bg-[#f6f5f2] text-zinc-950">
       <section className="flex min-w-0 flex-1 flex-col border-r border-zinc-200 bg-white">
@@ -387,6 +518,7 @@ function DocumentWorkspaceInner({ initialDocument }: DocumentWorkspaceProps) {
             initialBlocks={editorBlocks}
             onChange={handleEditorChange}
             readOnly={isAgentRunning}
+            onWorkshopBlock={enterWorkshop}
           />
         </div>
       </section>
@@ -437,4 +569,16 @@ function DocumentWorkspaceInner({ initialDocument }: DocumentWorkspaceProps) {
       ) : null}
     </main>
   );
+}
+
+// Defensive selector-escape for a block id when building the DOM query.
+// Block ids are UUIDs today so escaping is mostly a no-op, but the
+// fallback keeps us safe if the id format ever widens (e.g. agent-minted
+// ids that include colons or dots, which would otherwise blow up an
+// attribute-selector parser).
+function cssEscape(value: string): string {
+  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
+    return CSS.escape(value);
+  }
+  return value.replace(/["\\]/g, "\\$&");
 }

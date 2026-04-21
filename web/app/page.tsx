@@ -1,15 +1,18 @@
-// Homepage: the singleton primary-document experience.
+// Homepage: redirects to the canonical document URL.
 //
-// `force-dynamic` because the blocks are fetched per-request — caching a
-// snapshot would show stale content after every edit.
+// We used to render the primary document inline at `/`, but that hid the
+// document id and made back-navigation brittle (workshop mode couldn't
+// point at a stable origin URL). Now `/` resolves to the primary
+// document id and issues a permanent-ish redirect to
+// `/documents/:primaryId`, so every view the user lands in has an
+// explicit URL they can share or bookmark.
 
-import { getOrCreatePrimaryDocument } from "@/src/server/documents/document-service";
-import { DocumentWorkspace } from "@/app/components/document-workspace";
+import { redirect } from "next/navigation";
+import { getOrCreatePrimaryDocumentRecord } from "@/src/server/documents/document-repository";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const document = await getOrCreatePrimaryDocument();
-
-  return <DocumentWorkspace initialDocument={document} />;
+  const document = await getOrCreatePrimaryDocumentRecord();
+  redirect(`/documents/${document.id}`);
 }
