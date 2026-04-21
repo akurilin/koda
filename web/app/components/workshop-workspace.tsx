@@ -116,6 +116,21 @@ export function WorkshopWorkspace({
   // initialContent. We bump this whenever we swap which version is
   // displayed or inject a new agent proposal.
   const [editorKey, setEditorKey] = useState(0);
+  // Transient state for the agent-proposal flash animation. When non-null,
+  // an overlay renders over the target block and word-diffs `from` against
+  // `to` for a brief window before dissolving; see ProposalFlash below.
+  const [pendingFlash, setPendingFlash] = useState<{
+    from: string;
+    to: string;
+  } | null>(null);
+  const flashTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (flashTimeoutRef.current) {
+        clearTimeout(flashTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Keep a ref to the latest context so the chat transport's body function
   // captures the freshest snapshot every send without re-binding.
@@ -263,6 +278,16 @@ export function WorkshopWorkspace({
 
   const handleProposedRewrite = useCallback(
     (content: InlineContent[]) => {
+      // Snapshot the current version's plain text BEFORE we mutate state —
+      // the flash overlay diffs "where we were" against "where we're going",
+      // and reading live state from inside the updater would fight the ref-
+      // driven edit pipeline. `liveEditorBlocksRef` carries any uncommitted
+      // keystrokes the user made since the last onChange batch.
+      const fromPlain = inlineContentToPlainText(
+        blocksToInlineContent(liveEditorBlocksRef.current),
+      );
+      const toPlain = inlineContentToPlainText(content);
+
       setVersionState((current) => {
         const newVersion: Version = {
           blocks: [
@@ -288,6 +313,24 @@ export function WorkshopWorkspace({
       });
       setViewMode("latest");
       setEditorKey((key) => key + 1);
+
+      // Skip the flash when there's nothing to see (identical rewrite) or
+      // when the user has asked the OS to reduce motion. In both cases the
+      // editor remount above is the whole transition.
+      const reducedMotion =
+        typeof window !== "undefined" &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (reducedMotion || fromPlain === toPlain) {
+        return;
+      }
+      if (flashTimeoutRef.current) {
+        clearTimeout(flashTimeoutRef.current);
+      }
+      setPendingFlash({ from: fromPlain, to: toPlain });
+      flashTimeoutRef.current = setTimeout(() => {
+        setPendingFlash(null);
+        flashTimeoutRef.current = null;
+      }, 900);
     },
     [targetBlock.id],
   );
@@ -491,7 +534,7 @@ export function WorkshopWorkspace({
         </header>
         <div
           ref={editorPaneRef}
-          className="min-h-0 flex-1 overflow-auto"
+          className="relative min-h-0 flex-1 overflow-auto"
           data-testid="workshop-editor-pane"
         >
           {viewMode === "latest" ? (
@@ -503,6 +546,14 @@ export function WorkshopWorkspace({
                 onChange={handleEditorChange}
                 lockedToBlockId={targetBlock.id}
               />
+              {pendingFlash ? (
+                <ProposalFlash
+                  paneRef={editorPaneRef}
+                  targetBlockId={targetBlock.id}
+                  fromPlain={pendingFlash.from}
+                  toPlain={pendingFlash.to}
+                />
+              ) : null}
             </>
           ) : (
             <DiffView
@@ -946,3 +997,204 @@ function inlineContentToPlainText(content: BlockNoteBlock["content"]): string {
     })
     .join("");
 }
+
+/**
+ * Transient overlay shown the moment an agent proposal arrives. Covers the
+ * target paragraph for ~900ms and plays a word-level diff: removed words
+ * fade out with a strikethrough, added words fade in under a soft green
+ * highlight that then settles. Purely visual — the real version swap has
+ * already happened behind the overlay, so when this component unmounts the
+ * editor underneath is already showing the final content.
+ *
+ * To keep the animation legible the overlay targets BlockNote's
+ * `.bn-inline-content` element (where the actual text sits) and copies its
+ * computed font, spacing, and padding onto the overlay's text node. That
+ * way line wrapping, vertical rhythm, and indentation match the underlying
+ * paragraph — words flash in and out at exactly the positions they'll
+ * occupy once the editor re-renders. Inline styling (bold/italic/links)
+ * is intentionally flattened to plain text during the flash: the trade-off
+ * is that a bolded word won't animate bold, but the 900ms window ends with
+ * the real rich-content editor taking over, so the rich style returns on
+ * handoff.
+ */
+function ProposalFlash({
+  paneRef,
+  targetBlockId,
+  fromPlain,
+  toPlain,
+}: {
+  paneRef: React.RefObject<HTMLDivElement | null>;
+  targetBlockId: string;
+  fromPlain: string;
+  toPlain: string;
+}) {
+  const [layout, setLayout] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    height: number;
+    textStyle: React.CSSProperties;
+  } | null>(null);
+
+  // The editor remount (new editorKey) happens in the same render cycle
+  // that mounts this overlay, so the block DOM may not exist yet on first
+  // effect tick. A short MutationObserver mirrors the scroll-to-center
+  // strategy used for the main editor: try once, then watch for the block
+  // to appear and try again. Measured geometry is captured once — for a
+  // 900ms flash, chasing live layout changes isn't worth the complexity.
+  useEffect(() => {
+    const pane = paneRef.current;
+    if (!pane) {
+      return;
+    }
+    const escapedId =
+      typeof CSS !== "undefined" && "escape" in CSS
+        ? CSS.escape(targetBlockId)
+        : targetBlockId;
+    // `.bn-inline-content` is BlockNote's internal wrapper around the
+    // actual text runs. Measuring it (instead of the blockOuter) gives us
+    // the correct text box — the blockOuter includes side-menu gutter
+    // space that would shift the overlay a few px to the left of the text.
+    const selector = `[data-node-type="blockOuter"][data-id="${escapedId}"] .bn-inline-content`;
+
+    const measure = (): boolean => {
+      const el = pane.querySelector<HTMLElement>(selector);
+      if (!el) {
+        return false;
+      }
+      const paneRect = pane.getBoundingClientRect();
+      const rect = el.getBoundingClientRect();
+      // Zero width almost certainly means the element is still laying out
+      // (BlockNote's react-renderer mounts in a couple of phases). Defer
+      // until the MutationObserver fires us again with real dimensions.
+      if (rect.width === 0 || rect.height === 0) {
+        return false;
+      }
+      const computed = window.getComputedStyle(el);
+      setLayout({
+        top: rect.top - paneRect.top + pane.scrollTop,
+        left: rect.left - paneRect.left + pane.scrollLeft,
+        width: rect.width,
+        height: rect.height,
+        textStyle: {
+          fontFamily: computed.fontFamily,
+          fontSize: computed.fontSize,
+          fontWeight: computed.fontWeight as React.CSSProperties["fontWeight"],
+          fontStyle: computed.fontStyle,
+          lineHeight: computed.lineHeight,
+          letterSpacing: computed.letterSpacing,
+          color: computed.color,
+          textAlign: computed.textAlign as React.CSSProperties["textAlign"],
+          textIndent: computed.textIndent,
+          textTransform:
+            computed.textTransform as React.CSSProperties["textTransform"],
+          paddingTop: computed.paddingTop,
+          paddingRight: computed.paddingRight,
+          paddingBottom: computed.paddingBottom,
+          paddingLeft: computed.paddingLeft,
+          // Preserve wrap behavior (BlockNote sometimes sets pre-wrap),
+          // otherwise the diffed spaces could collapse differently from
+          // the editor.
+          whiteSpace: computed.whiteSpace as React.CSSProperties["whiteSpace"],
+          wordSpacing: computed.wordSpacing,
+          margin: 0,
+        },
+      });
+      return true;
+    };
+
+    if (measure()) {
+      return;
+    }
+    const observer = new MutationObserver(() => {
+      if (measure()) {
+        observer.disconnect();
+      }
+    });
+    observer.observe(pane, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [paneRef, targetBlockId]);
+
+  const changes = useMemo(
+    () => diffWordsWithSpace(fromPlain, toPlain),
+    [fromPlain, toPlain],
+  );
+
+  if (!layout) {
+    return null;
+  }
+
+  return (
+    <>
+      <style data-testid="workshop-flash-styles">{FLASH_KEYFRAMES}</style>
+      <div
+        className="pointer-events-none absolute z-10 overflow-hidden bg-white"
+        style={{
+          top: layout.top,
+          left: layout.left,
+          width: layout.width,
+          minHeight: layout.height,
+        }}
+        data-testid="workshop-proposal-flash"
+      >
+        <div style={layout.textStyle}>
+          {changes.map((change, index) => {
+            if (change.added) {
+              return (
+                <span
+                  key={index}
+                  className="workshop-flash-added"
+                  data-testid="workshop-flash-added"
+                >
+                  {change.value}
+                </span>
+              );
+            }
+            if (change.removed) {
+              return (
+                <span
+                  key={index}
+                  className="workshop-flash-removed"
+                  data-testid="workshop-flash-removed"
+                >
+                  {change.value}
+                </span>
+              );
+            }
+            return <span key={index}>{change.value}</span>;
+          })}
+        </div>
+      </div>
+    </>
+  );
+}
+
+// Keyframes are colocated with ProposalFlash because the component is the
+// only consumer — keeping them inline avoids pulling another global CSS
+// entry point into the workshop module. Timings are tuned against the
+// 900ms setTimeout in handleProposedRewrite: the green highlight is
+// already fading by the time the overlay unmounts, so the handoff to the
+// underlying editor looks continuous.
+const FLASH_KEYFRAMES = `
+  @keyframes workshop-flash-remove {
+    0%   { opacity: 1; }
+    40%  { opacity: 0.55; }
+    100% { opacity: 0; }
+  }
+  @keyframes workshop-flash-add {
+    0%   { opacity: 0.35; background-color: rgba(16, 185, 129, 0.18); }
+    45%  { opacity: 1; background-color: rgba(16, 185, 129, 0.42); }
+    75%  { opacity: 1; background-color: rgba(16, 185, 129, 0.42); }
+    100% { opacity: 1; background-color: rgba(16, 185, 129, 0); }
+  }
+  .workshop-flash-removed {
+    text-decoration: line-through;
+    color: rgb(190, 24, 93);
+    animation: workshop-flash-remove 550ms ease-in forwards;
+  }
+  .workshop-flash-added {
+    padding: 0 2px;
+    border-radius: 2px;
+    animation: workshop-flash-add 900ms ease-out both;
+  }
+`;
