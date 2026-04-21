@@ -23,11 +23,11 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AssistantPanel } from "./assistant-panel";
 import { buildDemoArticleBlocks } from "./demo-article";
-import {
+import type {
   BlockNoteBlock,
   DocumentBlockRecord,
   DocumentWithBlocks,
-} from "@/src/server/documents/types";
+} from "@/src/shared/documents";
 
 // BlockNote is client-only (it pokes at `window` on import). `ssr: false`
 // plus a loading placeholder keeps the server render lightweight and avoids

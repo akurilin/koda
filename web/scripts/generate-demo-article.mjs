@@ -72,7 +72,7 @@ const fileContent = `import type {
   BlockNoteBlock,
   InlineContent,
   SupportedBlockType,
-} from "@/src/server/documents/types";
+} from "@/src/shared/documents";
 
 type DemoEntry =
   | { kind: "heading"; level: 1 | 2 | 3; content: InlineContent[] }

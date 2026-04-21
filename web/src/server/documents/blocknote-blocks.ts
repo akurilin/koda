@@ -13,7 +13,7 @@ import {
   InlineContent,
   SupportedBlockType,
   supportedBlockTypes,
-} from "./types";
+} from "@/src/shared/documents";
 
 const supportedBlockTypeSet = new Set<string>(supportedBlockTypes);
 

@@ -10,7 +10,7 @@
 import { useCreateBlockNote } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/mantine";
 import { useMemo } from "react";
-import { BlockNoteBlock } from "@/src/server/documents/types";
+import type { BlockNoteBlock } from "@/src/shared/documents";
 
 type BlockNoteDocumentEditorProps = {
   initialBlocks: BlockNoteBlock[];

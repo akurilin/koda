@@ -12,7 +12,7 @@ import {
   DocumentBlockRecord,
   DocumentRecord,
   SupportedBlockType,
-} from "./types";
+} from "@/src/shared/documents";
 
 // Mirror of the `documents` table column names, used only for mapping.
 type RawDocumentRow = {

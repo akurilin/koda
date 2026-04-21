@@ -1,5 +1,10 @@
 // Shared domain primitives for the document model.
 //
+// Lives under `src/shared/` (not `src/server/`) so client components can
+// import it without dragging server-only runtime code into their bundles.
+// Nothing in this file may depend on `node:*`, `postgres`, or any other
+// server-only module.
+//
 // BlockNote is the source-of-truth schema for rendered blocks, but we keep our
 // own narrowed type definitions here so that server code doesn't depend on the
 // editor package and so we can constrain which block shapes the backend will

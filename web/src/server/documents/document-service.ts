@@ -40,7 +40,7 @@ import {
   MutationResult,
   MutationSource,
   SupportedBlockType,
-} from "./types";
+} from "@/src/shared/documents";
 
 export async function createDocument(input: {
   testRunId?: string | null;
