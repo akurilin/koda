@@ -35,7 +35,6 @@ export async function POST(request: Request, context: MoveRouteContext) {
     afterBlockId:
       typeof body.afterBlockId === "string" ? body.afterBlockId : null,
     expectedRevision,
-    source: "user",
   });
 
   if (!result.ok) {

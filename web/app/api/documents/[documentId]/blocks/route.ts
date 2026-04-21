@@ -25,13 +25,11 @@ export async function POST(request: Request, context: BlocksRouteContext) {
       ? await appendBlock({
           documentId,
           blockJson: body.blockJson,
-          source: "user",
         })
       : await insertBlockAfter({
           documentId,
           referenceBlockId: body.afterBlockId,
           blockJson: body.blockJson,
-          source: "user",
         });
 
   return Response.json(block, { status: 201 });

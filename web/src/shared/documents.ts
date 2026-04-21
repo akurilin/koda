@@ -104,13 +104,6 @@ export type DocumentWithBlocks = DocumentRecord & {
 };
 
 /**
- * Origin of a mutation, so we can later distinguish user edits from agent
- * edits in logs or audit trails without coupling the service layer to a
- * transport-specific concept.
- */
-export type MutationSource = "user" | "agent" | "test";
-
-/**
  * Returned when optimistic concurrency fails.
  *
  * `currentBlock` is the freshest row we could read (or null if the block is

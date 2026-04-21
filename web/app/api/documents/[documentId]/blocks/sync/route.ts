@@ -27,7 +27,6 @@ export async function PUT(request: Request, context: SyncRouteContext) {
       !Array.isArray(body.expectedRevisions)
         ? body.expectedRevisions
         : {},
-    source: "user",
   });
 
   if (!result.ok) {

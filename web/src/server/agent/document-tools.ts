@@ -65,7 +65,6 @@ export async function replaceBlockTextTool(input: {
     blockId: input.blockId,
     text: input.text,
     expectedRevision: input.expectedRevision,
-    source: "agent",
   });
 
   if (!result.ok) {
@@ -100,7 +99,6 @@ export async function insertBlockAfterTool(input: {
     documentId: input.documentId,
     referenceBlockId: input.referenceBlockId,
     blockJson: createTextBlock(input.text),
-    source: "agent",
   });
 
   return {
@@ -122,7 +120,6 @@ export async function deleteBlockTool(input: {
     documentId: input.documentId,
     blockId: input.blockId,
     expectedRevision: input.expectedRevision,
-    source: "agent",
   });
 
   if (!result.ok) {

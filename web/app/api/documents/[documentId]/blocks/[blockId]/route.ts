@@ -50,14 +50,12 @@ export async function PATCH(request: Request, context: BlockRouteContext) {
           blockId,
           text: body.text,
           expectedRevision,
-          source: "user",
         })
       : await replaceBlock({
           documentId,
           blockId,
           blockJson: body.blockJson,
           expectedRevision,
-          source: "user",
         });
 
   if (!result.ok) {
@@ -89,7 +87,6 @@ export async function DELETE(request: Request, context: BlockRouteContext) {
     documentId,
     blockId,
     expectedRevision,
-    source: "user",
   });
 
   if (!result.ok) {

@@ -38,7 +38,6 @@ import {
   DocumentBlockRecord,
   DocumentWithBlocks,
   MutationResult,
-  MutationSource,
   SupportedBlockType,
 } from "@/src/shared/documents";
 
@@ -99,19 +98,16 @@ export async function appendTextBlock(input: {
   documentId: string;
   text: string;
   type?: SupportedBlockType;
-  source?: MutationSource;
 }): Promise<DocumentBlockRecord> {
   return appendBlock({
     documentId: input.documentId,
     blockJson: createTextBlock(input.text, input.type),
-    source: input.source,
   });
 }
 
 export async function appendBlock(input: {
   documentId: string;
   blockJson: unknown;
-  source?: MutationSource;
 }): Promise<DocumentBlockRecord> {
   const block = prepareBlock(input.blockJson);
 
@@ -125,7 +121,6 @@ export async function insertBlockAfter(input: {
   documentId: string;
   referenceBlockId: string | null;
   blockJson: unknown;
-  source?: MutationSource;
 }): Promise<DocumentBlockRecord> {
   const block = prepareBlock(input.blockJson);
 
@@ -150,7 +145,6 @@ export async function replaceBlockText(input: {
   blockId: string;
   text: string;
   expectedRevision: number;
-  source?: MutationSource;
 }): Promise<MutationResult<DocumentBlockRecord>> {
   const currentBlock = await getBlockRecord(input.blockId);
 
@@ -168,7 +162,6 @@ export async function replaceBlockText(input: {
     blockId: input.blockId,
     blockJson,
     expectedRevision: input.expectedRevision,
-    source: input.source,
   });
 }
 
@@ -182,7 +175,6 @@ export async function replaceBlock(input: {
   blockId: string;
   blockJson: unknown;
   expectedRevision: number;
-  source?: MutationSource;
 }): Promise<MutationResult<DocumentBlockRecord>> {
   const block = prepareBlock(input.blockJson, input.blockId);
   const updatedBlock = await updateBlockRecord({
@@ -210,7 +202,6 @@ export async function deleteBlock(input: {
   documentId: string;
   blockId: string;
   expectedRevision: number;
-  source?: MutationSource;
 }): Promise<MutationResult<DocumentBlockRecord>> {
   const deletedBlock = await deleteBlockRecord({
     documentId: input.documentId,
@@ -248,7 +239,6 @@ export async function moveBlock(input: {
   blockId: string;
   afterBlockId: string | null;
   expectedRevision?: number;
-  source?: MutationSource;
 }): Promise<MutationResult<DocumentBlockRecord[]>> {
   const currentBlocks = await listBlockRecords(input.documentId);
   const movedBlock = currentBlocks.find((block) => block.id === input.blockId);
@@ -303,7 +293,6 @@ export async function syncDocumentBlocks(input: {
   documentId: string;
   blocks: unknown[];
   expectedRevisions: Record<string, number | undefined>;
-  source?: MutationSource;
 }): Promise<MutationResult<DocumentBlockRecord[]>> {
   const blocks = input.blocks.map((block) => prepareBlock(block));
   const result = await syncDocumentBlockRecords({

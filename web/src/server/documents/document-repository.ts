@@ -1,10 +1,10 @@
 // Thin persistence layer for documents and blocks.
 //
 // Everything in this file is "row in / row out" — it owns the SQL, nothing
-// else does. Higher-level invariants (source tagging, input normalization,
-// conflict shaping) live in document-service.ts. Keeping SQL isolated here
-// means the rest of the codebase can remain database-agnostic and lets us
-// audit all queries in one place.
+// else does. Higher-level invariants (input normalization, conflict shaping)
+// live in document-service.ts. Keeping SQL isolated here means the rest of
+// the codebase can remain database-agnostic and lets us audit all queries
+// in one place.
 
 import { sql } from "@/src/server/db/postgres";
 import {
