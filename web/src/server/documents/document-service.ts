@@ -11,6 +11,7 @@ import {
   deleteDocumentRecord,
   getBlockRecord,
   getDocumentRecord,
+  getOrCreatePrimaryDocumentRecord,
   insertBlockAfterRecord,
   listBlockRecords,
   syncTopLevelBlockRecords,
@@ -53,6 +54,15 @@ export async function getDocument(
   return {
     ...document,
     blocks: await listBlockRecords(documentId),
+  };
+}
+
+export async function getOrCreatePrimaryDocument(): Promise<DocumentWithBlocks> {
+  const document = await getOrCreatePrimaryDocumentRecord();
+
+  return {
+    ...document,
+    blocks: await listBlockRecords(document.id),
   };
 }
 

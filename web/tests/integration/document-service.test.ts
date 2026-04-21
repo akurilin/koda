@@ -4,6 +4,7 @@ import {
   createDocument,
   deleteBlock,
   getDocument,
+  getOrCreatePrimaryDocument,
   insertBlockAfter,
   moveBlock,
   replaceBlock,
@@ -192,6 +193,15 @@ describe("document service", () => {
 
     const reloaded = await getDocument(document.id);
     expect(reloaded?.blocks[0]?.plainText).toBe("First update");
+  });
+
+  it("returns the same singleton primary document on repeated calls", async () => {
+    const first = await getOrCreatePrimaryDocument();
+    const second = await getOrCreatePrimaryDocument();
+
+    expect(first.testRunId).toBeNull();
+    expect(second.id).toBe(first.id);
+    expect(second.testRunId).toBeNull();
   });
 
   it("syncs editor blocks with revision checks", async () => {

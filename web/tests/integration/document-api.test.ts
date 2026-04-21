@@ -17,6 +17,19 @@ describe("document API routes", () => {
     await cleanupTestRun(testRunId);
   });
 
+  it("rejects document creation without a testRunId", async () => {
+    const response = await createDocumentRoute(
+      jsonRequest("http://localhost/api/documents", {
+        title: "no_test_run_id",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+
+    const body = await response.json();
+    expect(body.error).toMatch(/testRunId/);
+  });
+
   it("creates, appends, updates, and reloads a document", async () => {
     const createResponse = await createDocumentRoute(
       jsonRequest("http://localhost/api/documents", {

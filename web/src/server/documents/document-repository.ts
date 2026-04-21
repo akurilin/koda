@@ -63,6 +63,34 @@ export async function getDocumentRecord(
   return row ? mapDocumentRow(row) : null;
 }
 
+export async function getOrCreatePrimaryDocumentRecord(): Promise<DocumentRecord> {
+  return sql.begin(async (tx) => {
+    await tx`
+      SELECT pg_advisory_xact_lock(hashtext('documents_primary_singleton'))
+    `;
+
+    const [existing] = await tx<RawDocumentRow[]>`
+      SELECT *
+      FROM documents
+      WHERE test_run_id IS NULL
+      ORDER BY created_at ASC
+      LIMIT 1
+    `;
+
+    if (existing) {
+      return mapDocumentRow(existing);
+    }
+
+    const [created] = await tx<RawDocumentRow[]>`
+      INSERT INTO documents (title, test_run_id)
+      VALUES ('', NULL)
+      RETURNING *
+    `;
+
+    return mapDocumentRow(created);
+  });
+}
+
 export async function deleteDocumentRecord(documentId: string): Promise<void> {
   await sql`
     DELETE FROM documents
