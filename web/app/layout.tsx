@@ -1,3 +1,7 @@
+// App-wide layout. Loads BlockNote's CSS at the root so the editor theme is
+// available as soon as the component mounts, and sets up the global font
+// variables that Tailwind references.
+
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "@blocknote/core/fonts/inter.css";

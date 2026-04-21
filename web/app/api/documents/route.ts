@@ -1,3 +1,11 @@
+// Creation endpoint for test-run documents.
+//
+// The app is currently wired around a singleton primary document (see the
+// homepage and `getOrCreatePrimaryDocument`), so this route intentionally
+// refuses to create "real" documents and only exists for e2e/integration
+// tests that need an isolated row tagged with their own `testRunId`. When we
+// grow a multi-document UI this guard can be relaxed.
+
 import { createDocument } from "@/src/server/documents/document-service";
 
 export async function POST(request: Request) {

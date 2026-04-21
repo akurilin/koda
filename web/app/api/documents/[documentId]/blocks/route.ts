@@ -1,3 +1,10 @@
+// Block insertion endpoint.
+//
+// Appends to the end when `afterBlockId` is omitted, inserts after the given
+// block otherwise. Splitting the two modes on presence (rather than a null
+// sentinel) keeps the contract simple: callers that want "add at the top"
+// send `afterBlockId: null` through the insert path.
+
 import {
   appendBlock,
   insertBlockAfter,

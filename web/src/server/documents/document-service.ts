@@ -1,3 +1,18 @@
+// Application-level document operations.
+//
+// This is the layer the HTTP routes and the agent tools go through. It sits
+// between inbound JSON (which we don't trust) and the repository (which
+// assumes pre-validated inputs). The responsibilities are:
+//
+//   - run every incoming block through `normalizeBlock` so we fail fast on
+//     malformed payloads and never pass raw user data to SQL
+//   - keep the `plain_text` projection in sync with `block_json` on every
+//     write, since the repository doesn't derive one from the other
+//   - turn repository-level "returned null" conflict signals into the
+//     explicit `MutationResult<T>` union that callers can branch on
+//   - expose a single entry point per logical operation so routes and agent
+//     tools share identical semantics
+
 import {
   blockToPlainText,
   createTextBlock,
@@ -57,6 +72,12 @@ export async function getDocument(
   };
 }
 
+/**
+ * Resolve the singleton primary document used by the homepage.
+ *
+ * See `getOrCreatePrimaryDocumentRecord` for why we guarantee a single row
+ * instead of building a full document-list UI.
+ */
 export async function getOrCreatePrimaryDocument(): Promise<DocumentWithBlocks> {
   const document = await getOrCreatePrimaryDocumentRecord();
 
@@ -70,6 +91,12 @@ export async function deleteDocument(documentId: string): Promise<void> {
   await deleteDocumentRecord(documentId);
 }
 
+/**
+ * Convenience wrapper for the common "add a paragraph of plain text" case.
+ *
+ * Kept separate from `appendBlock` so agent-authored inserts can stick to a
+ * string API without fabricating a BlockNote JSON payload themselves.
+ */
 export async function appendTextBlock(input: {
   documentId: string;
   text: string;
@@ -111,6 +138,15 @@ export async function insertBlockAfter(input: {
   });
 }
 
+/**
+ * Replace a block's contents with a plain-text string. This is the agent's
+ * primary editing verb — it intentionally strips any inline styling on the
+ * block because the agent reasons about blocks as plain text and we don't
+ * want it to inadvertently preserve marks it can't see.
+ *
+ * Fails with a conflict if the block is gone, moved to a different
+ * document, or its revision doesn't match.
+ */
 export async function replaceBlockText(input: {
   documentId: string;
   blockId: string;
@@ -138,6 +174,11 @@ export async function replaceBlockText(input: {
   });
 }
 
+/**
+ * Full-block replacement path used by the editor's PATCH endpoint. The
+ * `blockId` from the URL wins over any id in the payload (see `prepareBlock`
+ * -> `normalizeBlock`) so a client can't rename a block via an update.
+ */
 export async function replaceBlock(input: {
   documentId: string;
   blockId: string;
@@ -193,6 +234,17 @@ export async function deleteBlock(input: {
   };
 }
 
+/**
+ * Reorder: move a single block to a new position.
+ *
+ * `expectedRevision` is optional here because reordering doesn't change
+ * block content. The caller may still pass one when they want to guard
+ * against moving a block that's been concurrently edited.
+ *
+ * We do the reordering in-memory first (array splice), then hand a full
+ * ordered id list to the repository so it can commit one consistent order
+ * — the repository's two-phase write is what actually makes this safe.
+ */
 export async function moveBlock(input: {
   documentId: string;
   blockId: string;
@@ -241,6 +293,14 @@ export async function moveBlock(input: {
   };
 }
 
+/**
+ * Whole-document save used by the editor's debounced autosave loop.
+ *
+ * The client submits the full current block list plus the revisions it
+ * thought it was editing on top of. The repository's sync routine is what
+ * enforces per-block optimistic concurrency; this function just handles
+ * input normalization and conflict shaping.
+ */
 export async function syncDocumentBlocks(input: {
   documentId: string;
   blocks: unknown[];
@@ -268,6 +328,9 @@ export async function syncDocumentBlocks(input: {
   };
 }
 
+// Shared normalization step for every write path: validates the block shape
+// and attaches an up-to-date plain-text projection. Centralized so the rules
+// can't diverge between the REST surface and the agent tools.
 function prepareBlock(blockJson: unknown, forcedId?: string) {
   const block = normalizeBlock(blockJson, forcedId);
 
@@ -277,6 +340,13 @@ function prepareBlock(blockJson: unknown, forcedId?: string) {
   };
 }
 
+/**
+ * Project stored blocks into the shape the BlockNote editor expects.
+ *
+ * Trivial today because our persisted JSON matches the editor's format
+ * verbatim, but keeping the function around gives us a single place to add
+ * a migration/shim if the editor schema ever drifts.
+ */
 export function documentBlocksToEditorBlocks(
   blocks: DocumentBlockRecord[],
 ): BlockNoteBlock[] {

@@ -1,3 +1,12 @@
+// Block-shape utilities for the narrow subset of BlockNote JSON we persist.
+//
+// The point of this module is to keep all knowledge of the editor's JSON
+// format in one place: the repository reads/writes rows, the service layer
+// orchestrates mutations, and everything that needs to poke at the innards of
+// a block (normalization, plain-text projection, creating a fresh block) goes
+// through here. If BlockNote's schema ever shifts, this is the single file
+// that should need to change.
+
 import { randomUUID } from "node:crypto";
 import {
   BlockNoteBlock,
@@ -12,6 +21,11 @@ export function isSupportedBlockType(type: string): type is SupportedBlockType {
   return supportedBlockTypeSet.has(type);
 }
 
+/**
+ * Factory for a minimal BlockNote block, used when the server originates a
+ * block (e.g. the agent inserting a new paragraph). The client-authored path
+ * generates its own IDs inside BlockNote, so this is server-side only.
+ */
 export function createTextBlock(
   text: string,
   type: SupportedBlockType = "paragraph",
@@ -26,6 +40,13 @@ export function createTextBlock(
   };
 }
 
+/**
+ * Overwrite a block's inline content with a single plain-text run.
+ *
+ * Used by the agent `replaceBlockText` path, which intentionally throws away
+ * any prior styling because the agent reasons in plain text and we don't want
+ * it to silently preserve formatting it can't see.
+ */
 export function replaceBlockText(
   block: BlockNoteBlock,
   text: string,
@@ -36,6 +57,13 @@ export function replaceBlockText(
   };
 }
 
+/**
+ * Flatten a block (and its children) to plain text.
+ *
+ * Persisted alongside each block so that search and the agent's view of the
+ * document have a cheap, pre-rendered representation without re-walking the
+ * inline-content tree on every read.
+ */
 export function blockToPlainText(block: BlockNoteBlock): string {
   const ownText = inlineContentToPlainText(block.content);
   const childText = block.children
@@ -46,6 +74,19 @@ export function blockToPlainText(block: BlockNoteBlock): string {
   return [ownText, childText].filter(Boolean).join("\n");
 }
 
+/**
+ * Coerce an untrusted JSON value into a valid `BlockNoteBlock` or throw.
+ *
+ * This is the single choke point between inbound JSON (HTTP bodies, agent
+ * tool arguments) and anything that writes to the database. We reject
+ * unknown block types, unknown inline shapes, and missing IDs so that the
+ * on-disk blocks are guaranteed to match the schema the editor expects when
+ * we rehydrate the document.
+ *
+ * `forcedId` is used by the update path so that the caller's URL-bound
+ * `blockId` wins over whatever the payload carries — prevents a client from
+ * renaming a block via a PATCH.
+ */
 export function normalizeBlock(
   value: unknown,
   forcedId?: string,
@@ -79,16 +120,31 @@ export function normalizeBlock(
   };
 }
 
+/**
+ * Assertion-style wrapper around `normalizeBlock` for places that only need
+ * to validate without keeping the normalized result.
+ */
 export function validateBlock(block: unknown): asserts block is BlockNoteBlock {
   normalizeBlock(block);
 }
 
+/**
+ * Stable-sort helper for rows that come out of the DB in arbitrary order.
+ * Exported as a utility for tests and any ad-hoc tooling that reconstructs a
+ * document from raw rows.
+ */
 export function buildDocumentFromRows<T extends { sortIndex: number }>(
   rows: T[],
 ): T[] {
   return [...rows].sort((a, b) => a.sortIndex - b.sortIndex);
 }
 
+/**
+ * Depth-first flatten of a block tree.
+ *
+ * Handy when an operation needs to touch every descendant (e.g. collecting
+ * all IDs) without caring about structural nesting.
+ */
 export function flattenDocumentBlocks(
   blocks: BlockNoteBlock[],
 ): BlockNoteBlock[] {
@@ -122,6 +178,9 @@ function inlineContentToPlainText(content: BlockNoteBlock["content"]): string {
     .join("");
 }
 
+// Accepts both the string form ("legacy" BlockNote shorthand) and the
+// structured array form, then always emits the array form. Storing one shape
+// simplifies every downstream consumer.
 function normalizeInlineContent(content: unknown): string | InlineContent[] {
   if (content === undefined || content === null) {
     return [];

@@ -1,3 +1,10 @@
+// Single-block read / update / delete.
+//
+// PATCH supports two modes: pass `text` for the lightweight "replace plain
+// text" path the agent uses, or `blockJson` for a full structural replace
+// from the editor. Both require `expectedRevision` — any conflict returns
+// 409 with the current block so the client can reconcile.
+
 import {
   deleteBlock,
   getDocument,

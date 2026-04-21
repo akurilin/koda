@@ -1,3 +1,7 @@
+// Per-document page, primarily used by e2e tests that drive an isolated
+// `testRunId` document. The production user experience routes through `/`
+// and the singleton primary document.
+
 import { notFound } from "next/navigation";
 import { getDocument } from "@/src/server/documents/document-service";
 import { DocumentWorkspace } from "@/app/components/document-workspace";

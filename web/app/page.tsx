@@ -1,3 +1,8 @@
+// Homepage: the singleton primary-document experience.
+//
+// `force-dynamic` because the blocks are fetched per-request — caching a
+// snapshot would show stale content after every edit.
+
 import { getOrCreatePrimaryDocument } from "@/src/server/documents/document-service";
 import { DocumentWorkspace } from "@/app/components/document-workspace";
 

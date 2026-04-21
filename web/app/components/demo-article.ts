@@ -1,3 +1,11 @@
+// Preset article used by the "Demo text" button.
+//
+// Kept separate from the workspace so the large, mostly-prose payload doesn't
+// sit in a component file. The entries use a trimmed-down `DemoEntry` shape
+// rather than authoring full `BlockNoteBlock` JSON by hand — it keeps the
+// content declaration readable, and `buildDemoArticleBlocks` fills in the
+// boilerplate (ids, empty children, editor props) at runtime.
+
 import type {
   BlockNoteBlock,
   InlineContent,
@@ -516,6 +524,13 @@ const demoEntries: DemoEntry[] = [
   },
 ];
 
+/**
+ * Turn the compact `demoEntries` list into fully-formed BlockNote blocks.
+ *
+ * Generates fresh UUIDs every call so each invocation produces a brand-new
+ * document — calling this twice and syncing both results must never produce
+ * duplicate block ids, since ids are the primary key.
+ */
 export function buildDemoArticleBlocks(): BlockNoteBlock[] {
   return demoEntries.map((entry) => {
     const type: SupportedBlockType =

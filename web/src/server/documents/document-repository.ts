@@ -1,3 +1,11 @@
+// Thin persistence layer for documents and blocks.
+//
+// Everything in this file is "row in / row out" — it owns the SQL, nothing
+// else does. Higher-level invariants (source tagging, input normalization,
+// conflict shaping) live in document-service.ts. Keeping SQL isolated here
+// means the rest of the codebase can remain database-agnostic and lets us
+// audit all queries in one place.
+
 import { sql } from "@/src/server/db/postgres";
 import {
   BlockNoteBlock,
@@ -6,6 +14,7 @@ import {
   SupportedBlockType,
 } from "./types";
 
+// Mirror of the `documents` table column names, used only for mapping.
 type RawDocumentRow = {
   id: string;
   title: string;
@@ -14,6 +23,7 @@ type RawDocumentRow = {
   updated_at: Date | string;
 };
 
+// Mirror of the `document_blocks` table column names, used only for mapping.
 type RawBlockRow = {
   id: string;
   document_id: string;
@@ -28,11 +38,23 @@ type RawBlockRow = {
   updated_at: Date | string;
 };
 
+/**
+ * Pre-normalized payload the repository needs to write a block.
+ *
+ * Service-layer callers are responsible for producing both the JSON and its
+ * plain-text projection so that they stay in sync; the repository never
+ * derives one from the other.
+ */
 export type PersistedBlockInput = {
   blockJson: BlockNoteBlock;
   plainText: string;
 };
 
+/**
+ * Surfaced by the sync path when a submitted block's revision doesn't match
+ * the current row. Callers use it to tell the editor exactly which block
+ * diverged.
+ */
 export type SyncConflict = {
   blockId: string;
   currentBlock: DocumentBlockRecord | null;
@@ -63,6 +85,17 @@ export async function getDocumentRecord(
   return row ? mapDocumentRow(row) : null;
 }
 
+/**
+ * Fetch-or-create the singleton primary document (the one backing the
+ * homepage).
+ *
+ * The app treats the "real" user document as a single row with a null
+ * `test_run_id`; test runs use their own rows tagged with an id. The
+ * advisory lock serializes concurrent first-render requests so we don't race
+ * and create two primary rows — the race window is tiny but real under cold
+ * start, and a duplicated primary document is far worse than a few ms of
+ * contention.
+ */
 export async function getOrCreatePrimaryDocumentRecord(): Promise<DocumentRecord> {
   return sql.begin(async (tx) => {
     await tx`
@@ -98,6 +131,12 @@ export async function deleteDocumentRecord(documentId: string): Promise<void> {
   `;
 }
 
+/**
+ * Load the top-level blocks of a document in authoring order.
+ *
+ * Nested children live in `block_json.children` rather than their own rows,
+ * so we intentionally only read rows with a null `parent_block_id`.
+ */
 export async function listBlockRecords(
   documentId: string,
 ): Promise<DocumentBlockRecord[]> {
@@ -124,6 +163,13 @@ export async function getBlockRecord(
   return row ? mapBlockRow(row) : null;
 }
 
+/**
+ * Add a block at the end of the document.
+ *
+ * Wrapped in a transaction because the `MAX(sort_index) + 1` read-then-write
+ * would otherwise race with a concurrent append and assign the same index to
+ * two blocks.
+ */
 export async function appendBlockRecord(input: {
   documentId: string;
   block: PersistedBlockInput;
@@ -160,6 +206,15 @@ export async function appendBlockRecord(input: {
   });
 }
 
+/**
+ * Insert a block immediately after a given reference (or at the very top
+ * when `referenceBlockId` is null).
+ *
+ * We shift the sort indices of everything below the insertion point by one
+ * in a single UPDATE, which is fine because the block ordering column has a
+ * deferred uniqueness constraint — otherwise we'd need the two-pass
+ * temporary-index dance used by `updateBlockOrder`.
+ */
 export async function insertBlockAfterRecord(input: {
   documentId: string;
   referenceBlockId: string | null;
@@ -214,6 +269,14 @@ export async function insertBlockAfterRecord(input: {
   });
 }
 
+/**
+ * Optimistic update.
+ *
+ * Returns `null` if `expectedRevision` no longer matches — the caller is
+ * expected to turn that into a `ConflictResult` so the client can reconcile.
+ * The `revision` column is incremented here so readers can tell they saw a
+ * stale copy.
+ */
 export async function updateBlockRecord(input: {
   documentId: string;
   blockId: string;
@@ -236,6 +299,11 @@ export async function updateBlockRecord(input: {
   return row ? mapBlockRow(row) : null;
 }
 
+/**
+ * Optimistic delete. Also compacts the sort indices of everything after the
+ * deleted block so that indices stay contiguous — the editor and the agent
+ * both rely on "index is the authoring position, with no gaps".
+ */
 export async function deleteBlockRecord(input: {
   documentId: string;
   blockId: string;
@@ -266,6 +334,15 @@ export async function deleteBlockRecord(input: {
   });
 }
 
+/**
+ * Apply a new ordering to the top-level blocks of a document.
+ *
+ * The two-pass write is deliberate: `document_blocks(document_id, sort_index)`
+ * is unique per parent, so we first shove every row into a temporary index
+ * range (`temporarySortIndex`) to avoid transient duplicates, then write the
+ * final indices. Doing this as a single UPDATE would hit the unique
+ * constraint mid-flight.
+ */
 export async function updateBlockOrder(input: {
   documentId: string;
   orderedBlockIds: string[];
@@ -301,6 +378,27 @@ export async function updateBlockOrder(input: {
   });
 }
 
+/**
+ * Reconcile a document's top-level blocks with a full set submitted by the
+ * editor.
+ *
+ * This is the hot path for the client's debounced "save everything" flow:
+ * the editor sends the entire current state plus the revisions it believed
+ * it was editing on top of. We:
+ *
+ *   1. SELECT ... FOR UPDATE so nobody else can mutate the same document
+ *      while we compare.
+ *   2. Fail fast with a conflict if any block the client knew about has
+ *      been changed out from under them (either by another tab or by the
+ *      agent).
+ *   3. Otherwise delete blocks the client no longer has, insert new ones,
+ *      update changed ones, and reindex everything to match the submitted
+ *      order.
+ *
+ * The block-level revision check is what lets a human edit and an agent
+ * edit coexist without clobbering each other — see `document-service.ts`
+ * for the higher-level contract.
+ */
 export async function syncTopLevelBlockRecords(input: {
   documentId: string;
   blocks: PersistedBlockInput[];
@@ -326,6 +424,8 @@ export async function syncTopLevelBlockRecords(input: {
       input.blocks.map((block) => block.blockJson.id),
     );
 
+    // Deletions: a block the client dropped is only safe to drop if they
+    // were editing on top of the revision that still exists in the DB.
     for (const currentBlock of existingBlocks) {
       if (!submittedIds.has(currentBlock.id)) {
         const expectedRevision = input.expectedRevisions[currentBlock.id];
@@ -342,6 +442,8 @@ export async function syncTopLevelBlockRecords(input: {
       }
     }
 
+    // Updates: same revision check for blocks that survived the client's
+    // submission, so we don't overwrite a fresher agent edit.
     for (const block of input.blocks) {
       const currentBlock = existingById.get(block.blockJson.id);
 
@@ -361,6 +463,9 @@ export async function syncTopLevelBlockRecords(input: {
       }
     }
 
+    // Park existing rows in the temporary-index range so the final write
+    // phase can freely reuse low indices without tripping the unique
+    // constraint (same trick as `updateBlockOrder`).
     for (const [index, block] of existingBlocks.entries()) {
       await tx`
         UPDATE document_blocks
@@ -403,6 +508,9 @@ export async function syncTopLevelBlockRecords(input: {
         continue;
       }
 
+      // Only bump `revision` if the JSON actually changed — reordering
+      // without edits shouldn't invalidate any concurrent agent's view of
+      // the block's content.
       const blockChanged =
         JSON.stringify(currentBlock.blockJson) !==
         JSON.stringify(block.blockJson);
@@ -437,6 +545,8 @@ export async function syncTopLevelBlockRecords(input: {
   });
 }
 
+// Snake-case row -> camelCase domain mapping. Isolated so the rest of the
+// code never has to know what the underlying columns are named.
 function mapDocumentRow(row: RawDocumentRow): DocumentRecord {
   return {
     id: row.id,
@@ -463,14 +573,21 @@ function mapBlockRow(row: RawBlockRow): DocumentBlockRecord {
   };
 }
 
+// postgres.js returns timestamps as Date when type-aware, as strings
+// otherwise. Normalize both to ISO strings at the boundary.
 function toIsoString(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : value;
 }
 
+// Sort indices used only while a reorder is mid-flight. Picked well above any
+// plausible real index so the two write phases can coexist without collisions.
 function temporarySortIndex(index: number): number {
   return 1_000_000 + index;
 }
 
+// postgres.js's `sql.json` helper expects a JSON-serializable value; the
+// compiler otherwise complains about unknown shapes. This is the single
+// place we accept that type fudge.
 function asJson(value: unknown): Parameters<typeof sql.json>[0] {
   return value as Parameters<typeof sql.json>[0];
 }

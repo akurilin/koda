@@ -29,6 +29,21 @@ This is a monorepo Git repository. The Next.js codebase lives under the
 - Do not add automated Git hooks yet; formatting should remain a manual
   pre-commit step while the project is in flux.
 
+## Documentation
+
+- Every function, type, interface, React component, and other core logic
+  construct should carry at least a minimal comment or docstring so future
+  readers can orient without diving into internals.
+- Lead with the **why**: the reason this piece exists, the constraint it
+  enforces, the invariant it protects, or the non-obvious interaction it
+  participates in. Avoid restating the **what** when a well-named identifier
+  or a short function body already makes it obvious.
+- Trivial helpers (one-liner getters, obvious adapters, internal formatting
+  utilities) can stay uncommented when the name is unambiguous. When in
+  doubt, prefer a short comment over none.
+- When changing a commented construct, update the comment in the same change
+  — stale documentation is worse than missing documentation.
+
 ## Project Purpose
 
 The project implements a web-based agentic prose editor for article writers.

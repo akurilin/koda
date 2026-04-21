@@ -1,3 +1,22 @@
+// Top-level workspace shell: editor on the left, assistant panel on the right.
+//
+// This component owns the document state shared between the two panes and the
+// autosave loop that keeps the server in sync. Responsibilities:
+//
+//   - Hold the authoritative `document` state on the client.
+//   - Debounce edits from the editor and PUT the full block list to the
+//     sync endpoint. The server is the source of truth for revisions and
+//     returns the canonical blocks we then re-seat into local state.
+//   - Poll for server-side changes so agent edits made while the user is
+//     idle show up without manual refresh.
+//   - Expose a "Demo text" escape hatch that fully replaces the document
+//     with a preset article, confirmed via a modal because it destroys the
+//     user's current content.
+//
+// The `editorVersion` counter is used as the BlockNote key so we can force
+// the editor to remount when the server-side state diverges from what the
+// user has in the buffer (e.g. agent rewrote a block, demo article applied).
+
 "use client";
 
 import dynamic from "next/dynamic";
@@ -10,6 +29,9 @@ import {
   DocumentWithBlocks,
 } from "@/src/server/documents/types";
 
+// BlockNote is client-only (it pokes at `window` on import). `ssr: false`
+// plus a loading placeholder keeps the server render lightweight and avoids
+// hydration mismatches.
 const BlockNoteDocumentEditor = dynamic(
   () =>
     import("./blocknote-document-editor").then(
@@ -37,7 +59,13 @@ export function DocumentWorkspace({ initialDocument }: DocumentWorkspaceProps) {
   );
   const [demoDialogOpen, setDemoDialogOpen] = useState(false);
   const [demoBusy, setDemoBusy] = useState(false);
+  // `documentRef` lets callbacks read the latest document id without
+  // invalidating on every state change — the id is stable, but we still
+  // need a handle that closures can reach without re-binding.
   const documentRef = useRef(initialDocument);
+  // Snapshot of the last block JSON we saw from the server. Used to decide
+  // whether background polling actually diverged from the editor buffer; if
+  // it didn't, we avoid forcing a remount and losing the user's caret.
   const lastEditorSnapshot = useRef(
     JSON.stringify(initialDocument.blocks.map((block) => block.blockJson)),
   );
@@ -52,6 +80,8 @@ export function DocumentWorkspace({ initialDocument }: DocumentWorkspaceProps) {
     [document.blocks],
   );
 
+  // Flattened map of revisions so the sync endpoint can do per-block
+  // optimistic-concurrency checks.
   const revisionMap = useMemo(
     () =>
       Object.fromEntries(
@@ -60,6 +90,8 @@ export function DocumentWorkspace({ initialDocument }: DocumentWorkspaceProps) {
     [document.blocks],
   );
 
+  // Pull the freshest server copy. Called by the background poll and after
+  // a conflict so the user sees the truth instead of their stale buffer.
   const refreshDocument = useCallback(async () => {
     const response = await fetch(`/api/documents/${documentRef.current.id}`, {
       cache: "no-store",
@@ -74,6 +106,8 @@ export function DocumentWorkspace({ initialDocument }: DocumentWorkspaceProps) {
       nextDocument.blocks.map((block) => block.blockJson),
     );
 
+    // Only remount the editor if something actually changed — otherwise a
+    // harmless poll would clobber the user's current selection.
     if (nextSnapshot !== lastEditorSnapshot.current) {
       lastEditorSnapshot.current = nextSnapshot;
       setEditorVersion((version) => version + 1);
@@ -82,6 +116,8 @@ export function DocumentWorkspace({ initialDocument }: DocumentWorkspaceProps) {
     setDocument(nextDocument);
   }, []);
 
+  // Background poll. Intentionally pauses while a save is in flight so we
+  // don't overwrite our own optimistic state with a pre-save read.
   useEffect(() => {
     const interval = window.setInterval(() => {
       if (saveState !== "saving") {
@@ -92,6 +128,9 @@ export function DocumentWorkspace({ initialDocument }: DocumentWorkspaceProps) {
     return () => window.clearInterval(interval);
   }, [refreshDocument, saveState]);
 
+  // Commit the current editor buffer to the server. A 409 means another
+  // actor (another tab, the agent) moved ahead of us; we pull their version
+  // rather than try to merge client-side.
   const syncBlocks = useCallback(
     async (blocks: BlockNoteBlock[]) => {
       setSaveState("saving");
@@ -137,6 +176,9 @@ export function DocumentWorkspace({ initialDocument }: DocumentWorkspaceProps) {
     [refreshDocument, revisionMap],
   );
 
+  // Editor edits come in bursts as the user types; debounce keeps us from
+  // hammering the sync endpoint and lets us batch rapid changes into one
+  // PUT. 600ms is short enough to feel live, long enough to batch a flurry.
   const handleEditorChange = useCallback(
     (blocks: BlockNoteBlock[]) => {
       if (saveTimer.current) {
@@ -150,6 +192,10 @@ export function DocumentWorkspace({ initialDocument }: DocumentWorkspaceProps) {
     [syncBlocks],
   );
 
+  // One-shot "replace everything with the preset article" action. Used in
+  // demos and as a quick way to reset the doc. Goes through the normal sync
+  // endpoint so the server still enforces the schema and emits real row
+  // ids/revisions.
   const applyDemoArticle = useCallback(async () => {
     if (saveTimer.current) {
       window.clearTimeout(saveTimer.current);
@@ -190,12 +236,16 @@ export function DocumentWorkspace({ initialDocument }: DocumentWorkspaceProps) {
       ...currentDocument,
       blocks: body.blocks,
     }));
+    // Force a remount so BlockNote picks up the entirely new block list
+    // instead of diffing from its previous internal state.
     setEditorVersion((version) => version + 1);
     setSaveState("saved");
     setDemoBusy(false);
     setDemoDialogOpen(false);
   }, [refreshDocument, revisionMap]);
 
+  // Drop any pending debounce on unmount so we don't fire a save into a
+  // component that no longer exists.
   useEffect(() => {
     return () => {
       if (saveTimer.current) {

@@ -1,3 +1,10 @@
+// Chat endpoint powering the right-hand editorial assistant panel.
+//
+// The UI sends `documentId` in the query string so the server can bind the
+// tool set to exactly one document — the model shouldn't be able to edit a
+// different document by slipping an id into its tool arguments. See
+// `createDocumentTools` for how that binding works.
+
 import { anthropic } from "@ai-sdk/anthropic";
 import {
   convertToModelMessages,
@@ -17,6 +24,9 @@ export async function POST(request: Request) {
 
   const { messages }: { messages: UIMessage[] } = await request.json();
 
+  // `stepCountIs(5)` caps tool-call recursion so a confused model can't
+  // runaway-loop on conflicts. The system prompt steers the model toward
+  // the revision-check contract the tools require.
   const result = streamText({
     model: anthropic(process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-5"),
     system: [

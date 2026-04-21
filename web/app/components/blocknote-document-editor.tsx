@@ -1,3 +1,10 @@
+// BlockNote editor wrapper.
+//
+// Isolates the editor package behind a minimal prop surface so the parent
+// workspace doesn't need to know about `useCreateBlockNote` or BlockNote's
+// internal block types. Loaded via `next/dynamic` with `ssr: false` by the
+// workspace because BlockNote touches `window` on import.
+
 "use client";
 
 import { useCreateBlockNote } from "@blocknote/react";
@@ -14,6 +21,9 @@ export function BlockNoteDocumentEditor({
   initialBlocks,
   onChange,
 }: BlockNoteDocumentEditorProps) {
+  // BlockNote refuses to initialize with an empty block list — feed it a
+  // single empty paragraph so a brand-new document still gives the user
+  // somewhere to type immediately.
   const emptyDocument = useMemo<BlockNoteBlock[]>(
     () => [
       {
@@ -26,6 +36,9 @@ export function BlockNoteDocumentEditor({
     ],
     [],
   );
+  // `as never` casts bridge our narrowed `BlockNoteBlock` type to the
+  // editor's looser internal type without pulling the editor's full type
+  // graph into the server-side domain.
   const editor = useCreateBlockNote({
     initialContent:
       initialBlocks.length > 0

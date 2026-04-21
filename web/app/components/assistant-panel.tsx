@@ -1,3 +1,13 @@
+// Right-hand editorial assistant panel.
+//
+// Wires the `@assistant-ui` primitives to the `/api/chat` endpoint, scoping
+// each conversation to a specific `documentId` via the query string (see the
+// chat route for why the binding is server-side and not a tool argument).
+//
+// The "Refresh" button calls back into the workspace so that after the agent
+// edits a block via its tools, the editor pulls the new server state instead
+// of waiting for the periodic poll.
+
 "use client";
 
 import {
@@ -22,6 +32,9 @@ export function AssistantPanel({
   documentId,
   onRefreshDocument,
 }: AssistantPanelProps) {
+  // `useMemo` keeps the transport instance stable across renders so the
+  // runtime doesn't rebuild its internal state every time the parent
+  // re-renders.
   const transport = useMemo(
     () =>
       new AssistantChatTransport({
@@ -85,6 +98,8 @@ export function AssistantPanel({
   );
 }
 
+// Chat bubble styling split out so the runtime's default renderer uses our
+// look instead of the package defaults. Kept intentionally stateless.
 function UserMessage() {
   return (
     <MessagePrimitive.Root className="mb-4 ml-auto max-w-[85%] rounded bg-white px-3 py-2 text-sm leading-6 text-zinc-950">
@@ -105,6 +120,8 @@ function AssistantMessage() {
   );
 }
 
+// `whitespace-pre-wrap` so model output that uses newlines renders the way
+// the model wrote it, instead of collapsing into one paragraph.
 function MessageText() {
   return (
     <div className="whitespace-pre-wrap">

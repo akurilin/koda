@@ -1,8 +1,12 @@
+// Per-document read and delete endpoints.
+
 import {
   deleteDocument,
   getDocument,
 } from "@/src/server/documents/document-service";
 
+// Next.js 15 makes route `params` a Promise; typing it here keeps the
+// async-await in the handler readable.
 type DocumentRouteContext = {
   params: Promise<{
     documentId: string;
