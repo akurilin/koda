@@ -1,0 +1,150 @@
+# Continuous integration: runs the same static-analysis and test suite
+# that pre-commit and `npm test` execute on a developer's machine, so CI
+# and local stay in lockstep.
+#
+# The lint job runs pre-commit (prettier, eslint, tsc, shellcheck,
+# gitleaks, squawk, hygiene hooks). The test job spins up Postgres,
+# applies Supabase migrations, and runs vitest + Playwright against a
+# real database — matching how integration and e2e tests behave locally.
+
+name: CI
+
+on:
+  push:
+    branches: [main, ci]
+  pull_request:
+
+# Cancel superseded runs on the same ref so a rapid push doesn't burn
+# minutes on a commit that's already out of date.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Next.js anonymous telemetry is noise in CI.
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  lint:
+    name: Static analysis (pre-commit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # gitleaks can scan history; give it the full graph so any future
+          # rule change flagging older commits still fires.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # Pin npm to the exact version the root package.json requires, so
+      # `engine-strict=true` in .npmrc doesn't reject installs on a CI
+      # runner that ships a different npm patch version.
+      - name: Pin npm version
+        run: npm install -g npm@11.12.1
+
+      - name: Install web/ dependencies
+        run: npm --prefix web ci
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache pre-commit environments
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      - name: Install pre-commit
+        run: pip install pre-commit
+
+      - name: Run pre-commit
+        run: pre-commit run --all-files --show-diff-on-failure
+
+  test:
+    name: Tests (unit, integration, e2e)
+    runs-on: ubuntu-latest
+
+    # Match the Postgres major version that supabase/config.toml targets
+    # so CI reproduces the engine behavior devs see locally.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: postgres
+        # Supabase's local stack binds Postgres to 54322; keep the same
+        # port in CI so DATABASE_URL defaults and test helpers work
+        # without bespoke overrides.
+        ports:
+          - 54322:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Pin npm version
+        run: npm install -g npm@11.12.1
+
+      - name: Install web/ dependencies
+        run: npm --prefix web ci
+
+      # Apply Supabase migrations directly with psql. The migrations are
+      # pure Postgres DDL (no auth.* or other Supabase-only schemas), so a
+      # vanilla postgres:17 service container is sufficient and avoids
+      # pulling the full supabase CLI stack.
+      - name: Apply database migrations
+        run: |
+          for migration in supabase/migrations/*.sql; do
+            echo "Applying $migration"
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"
+          done
+
+      - name: Run unit tests
+        run: npm run test:unit
+
+      - name: Run integration tests
+        run: npm run test:integration
+
+      # Playwright needs its browser binaries; --with-deps installs the
+      # OS-level libs Chromium requires on the runner image.
+      - name: Install Playwright browsers
+        run: npx --prefix web playwright install --with-deps chromium
+
+      # The test:e2e script runs `next build` then playwright, spinning
+      # up `next start` via playwright.config.ts's webServer block.
+      # RUN_AGENT_QA is intentionally unset so the Anthropic-dependent
+      # spec skips itself in CI.
+      - name: Run Playwright e2e tests
+        run: npm run test:e2e
+
+      # Always upload Playwright artifacts on failure so we can see
+      # screenshots and traces without re-running the job locally.
+      - name: Upload Playwright artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            /tmp/koda/playwright/report
+            /tmp/koda/playwright/test-results
+          retention-days: 7
