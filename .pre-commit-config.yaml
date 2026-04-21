@@ -50,20 +50,21 @@ repos:
       - id: squawk
         files: ^supabase/migrations/.*\.sql$
 
-  # Local hooks: delegate to the web/ package's npm scripts so we have one
-  # canonical definition of "lint" / "typecheck" / "format" that can be run
-  # by hand, in pre-commit, and in CI.
-  #
-  # These run on the entire web/ package (not just staged files) because
-  # ESLint cross-file rules and `tsc` both need the full graph to be sound.
+  # Local hooks wired to web/'s tooling. ESLint and `tsc` run against the
+  # whole web/ package (pass_filenames: false) because both need the full
+  # file graph to reason about cross-file rules and types. Prettier is
+  # per-file, so we let pre-commit pass filenames and widen the scope to
+  # include root-level markdown/YAML/JSON (README, CLAUDE.md, CI configs).
   - repo: local
     hooks:
       - id: prettier
         name: prettier (format check)
-        entry: npm --prefix web run format:check
+        # Call the binary directly so we can cover files outside web/
+        # without the npm script's hard-coded `.` target. web/.prettierignore
+        # still filters package-lock.json and other opt-outs.
+        entry: web/node_modules/.bin/prettier --check
         language: system
-        pass_filenames: false
-        files: ^web/.*\.(ts|tsx|js|jsx|mjs|cjs|json|md|css|yaml|yml)$
+        files: \.(ts|tsx|js|jsx|mjs|cjs|json|md|mdx|css|yaml|yml)$
 
       - id: eslint
         name: eslint
