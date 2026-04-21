@@ -234,6 +234,28 @@ path today has a single writer per document at a time (the user _or_ the
 agent, not both simultaneously), so the race window is effectively empty.
 Revisit when we add document-level collaboration or parallel agent tooling.
 
+### Undo is BlockNote-only and gets wiped on any editor remount
+
+Cmd/Ctrl+Z is just the ProseMirror history that BlockNote ships with — an
+in-memory transaction stack on the client. There is no server-side undo
+log, and no action journal that survives reloads. For a pure "user types,
+deletes, Cmd+Z" loop the stack behaves the way the user expects, because
+the sync endpoint happens to re-INSERT a block whose id reappears in the
+payload, so the undone block round-trips back into the DB.
+
+The non-obvious part is that the editor is remounted (via `editorVersion`)
+on three different flows: after a background poll finds divergent server
+state (any agent edit), after "Replace with demo text" completes, and on
+return from a workshop save. Each remount drops ProseMirror's history
+stack, which means Cmd+Z cannot undo an agent edit, a demo replacement,
+or a workshop save — your history resets to "now".
+
+A proper undo would either be a client-side action log independent of the
+editor instance, or a server-side versioned snapshot table with an undo
+endpoint. Both are out of scope for this prototype; we're treating
+workshop mode as the primary "I want to walk back this change" affordance
+for now.
+
 ## Deeper reading
 
 Longer-form write-ups live in [`docs/`](docs/):
