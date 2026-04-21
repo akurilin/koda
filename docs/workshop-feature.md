@@ -64,7 +64,7 @@ When the user is on V_k and hand-edits the paragraph, those edits update
 `versions[k]` directly. They do not branch into a new version. Clicking
 another version, then back to V_k, still shows the edited text.
 
-**Why:** predictable mental model ("you are editing *this* version") and
+**Why:** predictable mental model ("you are editing _this_ version") and
 avoids a combinatorial explosion of tiny hand-edit branches in the history.
 
 ### One agent tool only: `proposeRewrite`
