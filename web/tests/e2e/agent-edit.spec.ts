@@ -8,10 +8,7 @@ test.skip(
 test("the agent can make one precise block edit", async ({ page, request }) => {
   const testRunId = crypto.randomUUID();
   const createResponse = await request.post("/api/documents", {
-    data: {
-      title: `qa_agent_${testRunId}`,
-      testRunId,
-    },
+    data: { testRunId },
   });
   const document = await createResponse.json();
 

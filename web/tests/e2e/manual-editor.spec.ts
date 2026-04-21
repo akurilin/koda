@@ -6,10 +6,7 @@ test("a user can type and reload a multi-block document", async ({
 }) => {
   const testRunId = crypto.randomUUID();
   const createResponse = await request.post("/api/documents", {
-    data: {
-      title: `qa_manual_${testRunId}`,
-      testRunId,
-    },
+    data: { testRunId },
   });
   const document = await createResponse.json();
 

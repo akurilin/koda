@@ -22,7 +22,7 @@ describe("document agent tools", () => {
   });
 
   it("reads and edits through the same document service path", async () => {
-    const document = await createDocument({ title: "test_tools", testRunId });
+    const document = await createDocument({ testRunId });
     const block = await appendTextBlock({
       documentId: document.id,
       text: "Replace me",
@@ -51,10 +51,7 @@ describe("document agent tools", () => {
   });
 
   it("returns conflict data for stale revisions", async () => {
-    const document = await createDocument({
-      title: "test_tool_conflict",
-      testRunId,
-    });
+    const document = await createDocument({ testRunId });
     const block = await appendTextBlock({
       documentId: document.id,
       text: "Original",

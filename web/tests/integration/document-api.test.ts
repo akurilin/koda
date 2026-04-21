@@ -19,9 +19,7 @@ describe("document API routes", () => {
 
   it("rejects document creation without a testRunId", async () => {
     const response = await createDocumentRoute(
-      jsonRequest("http://localhost/api/documents", {
-        title: "no_test_run_id",
-      }),
+      jsonRequest("http://localhost/api/documents", {}),
     );
 
     expect(response.status).toBe(400);
@@ -32,10 +30,7 @@ describe("document API routes", () => {
 
   it("creates, appends, updates, and reloads a document", async () => {
     const createResponse = await createDocumentRoute(
-      jsonRequest("http://localhost/api/documents", {
-        title: "test_api",
-        testRunId,
-      }),
+      jsonRequest("http://localhost/api/documents", { testRunId }),
     );
     const document = await createResponse.json();
 

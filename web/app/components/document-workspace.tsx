@@ -258,34 +258,24 @@ export function DocumentWorkspace({ initialDocument }: DocumentWorkspaceProps) {
     <main className="flex h-screen min-h-0 bg-[#f6f5f2] text-zinc-950">
       <section className="flex min-w-0 flex-1 flex-col border-r border-zinc-200 bg-white">
         <header className="flex h-14 shrink-0 items-center justify-between border-b border-zinc-200 px-6">
-          <div className="min-w-0">
-            <p className="text-xs font-medium uppercase tracking-[0.08em] text-zinc-500">
-              Draft
-            </p>
-            <h1 className="truncate text-base font-semibold">
-              {document.title || "Untitled article"}
-            </h1>
-          </div>
-          <div className="flex items-center gap-2">
-            <div
-              className="rounded border border-zinc-200 px-2 py-1 text-xs text-zinc-500"
-              data-testid="save-state"
-            >
-              {saveState === "saving"
-                ? "Saving"
-                : saveState === "conflict"
-                  ? "Conflict"
-                  : "Saved"}
-            </div>
-            <button
-              type="button"
-              onClick={() => setDemoDialogOpen(true)}
-              disabled={demoBusy}
-              className="rounded border border-zinc-200 px-2 py-1 text-xs text-zinc-600 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
-              data-testid="demo-text-button"
-            >
-              Demo text
-            </button>
+          <button
+            type="button"
+            onClick={() => setDemoDialogOpen(true)}
+            disabled={demoBusy}
+            className="inline-flex items-center gap-1.5 rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-zinc-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900 disabled:cursor-not-allowed disabled:opacity-50"
+            data-testid="demo-text-button"
+          >
+            Demo text
+          </button>
+          <div
+            className="rounded border border-zinc-200 px-2 py-1 text-xs text-zinc-500"
+            data-testid="save-state"
+          >
+            {saveState === "saving"
+              ? "Saving"
+              : saveState === "conflict"
+                ? "Conflict"
+                : "Saved"}
           </div>
         </header>
         <div className="min-h-0 flex-1 overflow-auto" data-testid="editor-pane">

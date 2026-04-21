@@ -29,7 +29,10 @@ export function isSupportedBlockType(type: string): type is SupportedBlockType {
 export function createTextBlock(
   text: string,
   type: SupportedBlockType = "paragraph",
-  id = randomUUID(),
+  // Typed `string` rather than inheriting `randomUUID`'s template-literal
+  // type so callers can pass any stable id — the function doesn't actually
+  // require a UUID-shaped value, only the default happens to be one.
+  id: string = randomUUID(),
 ): BlockNoteBlock {
   return {
     id,

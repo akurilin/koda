@@ -26,10 +26,7 @@ describe("document service", () => {
   });
 
   it("creates a document", async () => {
-    const document = await createDocument({
-      title: "test_document_service_create",
-      testRunId,
-    });
+    const document = await createDocument({ testRunId });
 
     expect(document.id).toEqual(expect.any(String));
     expect(document.testRunId).toBe(testRunId);
@@ -37,7 +34,7 @@ describe("document service", () => {
   });
 
   it("appends and reloads ordered blocks", async () => {
-    const document = await createDocument({ title: "test_blocks", testRunId });
+    const document = await createDocument({ testRunId });
 
     await appendTextBlock({ documentId: document.id, text: "First" });
     await appendTextBlock({ documentId: document.id, text: "Second" });
@@ -54,7 +51,7 @@ describe("document service", () => {
   });
 
   it("inserts a block after another block", async () => {
-    const document = await createDocument({ title: "test_insert", testRunId });
+    const document = await createDocument({ testRunId });
     const first = await appendTextBlock({ documentId: document.id, text: "A" });
     await appendTextBlock({ documentId: document.id, text: "B" });
 
@@ -74,7 +71,7 @@ describe("document service", () => {
   });
 
   it("replaces block text and increments revision", async () => {
-    const document = await createDocument({ title: "test_replace", testRunId });
+    const document = await createDocument({ testRunId });
     const block = await appendTextBlock({
       documentId: document.id,
       text: "Before",
@@ -96,10 +93,7 @@ describe("document service", () => {
   });
 
   it("replaces full block JSON", async () => {
-    const document = await createDocument({
-      title: "test_replace_json",
-      testRunId,
-    });
+    const document = await createDocument({ testRunId });
     const block = await appendTextBlock({
       documentId: document.id,
       text: "Paragraph",
@@ -120,7 +114,7 @@ describe("document service", () => {
   });
 
   it("deletes a block and compacts order", async () => {
-    const document = await createDocument({ title: "test_delete", testRunId });
+    const document = await createDocument({ testRunId });
     await appendTextBlock({ documentId: document.id, text: "A" });
     const deleted = await appendTextBlock({
       documentId: document.id,
@@ -145,7 +139,7 @@ describe("document service", () => {
   });
 
   it("moves a block", async () => {
-    const document = await createDocument({ title: "test_move", testRunId });
+    const document = await createDocument({ testRunId });
     const a = await appendTextBlock({ documentId: document.id, text: "A" });
     const b = await appendTextBlock({ documentId: document.id, text: "B" });
     const c = await appendTextBlock({ documentId: document.id, text: "C" });
@@ -169,7 +163,7 @@ describe("document service", () => {
   });
 
   it("rejects stale writes", async () => {
-    const document = await createDocument({ title: "test_stale", testRunId });
+    const document = await createDocument({ testRunId });
     const block = await appendTextBlock({
       documentId: document.id,
       text: "Before",
@@ -205,7 +199,7 @@ describe("document service", () => {
   });
 
   it("syncs editor blocks with revision checks", async () => {
-    const document = await createDocument({ title: "test_sync", testRunId });
+    const document = await createDocument({ testRunId });
     const a = await appendTextBlock({ documentId: document.id, text: "A" });
     const b = await appendTextBlock({ documentId: document.id, text: "B" });
 

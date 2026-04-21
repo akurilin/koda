@@ -17,7 +17,6 @@ import {
 // Mirror of the `documents` table column names, used only for mapping.
 type RawDocumentRow = {
   id: string;
-  title: string;
   test_run_id: string | null;
   created_at: Date | string;
   updated_at: Date | string;
@@ -61,12 +60,11 @@ export type SyncConflict = {
 };
 
 export async function createDocumentRecord(input: {
-  title: string;
   testRunId?: string | null;
 }): Promise<DocumentRecord> {
   const [row] = await sql<RawDocumentRow[]>`
-    INSERT INTO documents (title, test_run_id)
-    VALUES (${input.title}, ${input.testRunId ?? null})
+    INSERT INTO documents (test_run_id)
+    VALUES (${input.testRunId ?? null})
     RETURNING *
   `;
 
@@ -115,8 +113,8 @@ export async function getOrCreatePrimaryDocumentRecord(): Promise<DocumentRecord
     }
 
     const [created] = await tx<RawDocumentRow[]>`
-      INSERT INTO documents (title, test_run_id)
-      VALUES ('', NULL)
+      INSERT INTO documents (test_run_id)
+      VALUES (NULL)
       RETURNING *
     `;
 
@@ -550,7 +548,6 @@ export async function syncTopLevelBlockRecords(input: {
 function mapDocumentRow(row: RawDocumentRow): DocumentRecord {
   return {
     id: row.id,
-    title: row.title,
     testRunId: row.test_run_id,
     createdAt: toIsoString(row.created_at),
     updatedAt: toIsoString(row.updated_at),

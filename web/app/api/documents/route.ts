@@ -22,7 +22,6 @@ export async function POST(request: Request) {
   }
 
   const document = await createDocument({
-    title: typeof body.title === "string" ? body.title : "",
     testRunId: body.testRunId,
   });
 

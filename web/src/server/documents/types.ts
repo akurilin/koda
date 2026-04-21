@@ -65,7 +65,6 @@ export type BlockNoteBlock = {
  */
 export type DocumentRecord = {
   id: string;
-  title: string;
   testRunId: string | null;
   createdAt: string;
   updatedAt: string;

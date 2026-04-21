@@ -43,11 +43,9 @@ import {
 } from "./types";
 
 export async function createDocument(input: {
-  title?: string;
   testRunId?: string | null;
 }): Promise<DocumentWithBlocks> {
   const document = await createDocumentRecord({
-    title: input.title ?? "",
     testRunId: input.testRunId ?? null,
   });
 

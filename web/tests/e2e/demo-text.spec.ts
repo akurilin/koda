@@ -6,10 +6,7 @@ test("a user can replace a blank document with the demo article", async ({
 }) => {
   const testRunId = crypto.randomUUID();
   const createResponse = await request.post("/api/documents", {
-    data: {
-      title: `qa_demo_${testRunId}`,
-      testRunId,
-    },
+    data: { testRunId },
   });
   const document = await createResponse.json();
 

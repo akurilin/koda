@@ -39,7 +39,6 @@ export async function getDocumentTool(input: { documentId: string }) {
 
   return {
     id: document.id,
-    title: document.title,
     blocks: document.blocks.map((block) => ({
       id: block.id,
       type: block.blockType,
