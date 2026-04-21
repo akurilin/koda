@@ -48,6 +48,10 @@ test("a user can replace a blank document with the demo article", async ({
         "The code nobody reads might just be the code of the future.",
       ),
     ).toBeVisible();
+
+    const anchors = editorPane.locator("a[href]");
+    await expect(anchors.first()).toBeVisible();
+    expect(await anchors.count()).toBeGreaterThanOrEqual(5);
   } finally {
     await request.delete(`/api/documents/${document.id}`);
   }

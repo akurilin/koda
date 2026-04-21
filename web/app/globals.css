@@ -28,3 +28,13 @@ body {
 .bn-container {
   --bn-colors-editor-background: transparent;
 }
+
+.bn-editor a[href] {
+  color: #1d4ed8;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.bn-editor a[href]:hover {
+  color: #1e3a8a;
+}
