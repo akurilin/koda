@@ -29,6 +29,16 @@ This is a monorepo Git repository. The Next.js codebase lives under the
 - Do not add automated Git hooks yet; formatting should remain a manual
   pre-commit step while the project is in flux.
 
+## Validating UI changes
+
+- When a Playwright e2e test already exercises the surface you changed,
+  run that test and rely on it.
+- When no e2e test covers the change, drive the UI yourself with
+  `npx agent-browser ...` against the running dev server before handing
+  the task back. Treat "I can't test this" as a last resort — it pushes
+  validation onto the user and should be called out explicitly when it
+  happens, not silently skipped.
+
 ## Documentation
 
 - Every function, type, interface, React component, and other core logic
