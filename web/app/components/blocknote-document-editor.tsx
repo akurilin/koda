@@ -15,11 +15,16 @@ import type { BlockNoteBlock } from "@/src/shared/documents";
 type BlockNoteDocumentEditorProps = {
   initialBlocks: BlockNoteBlock[];
   onChange: (blocks: BlockNoteBlock[]) => void;
+  // When true, the editor is frozen in read-only mode. Used by the workspace
+  // to lock the editor while the assistant is writing so human and agent
+  // edits can't interleave.
+  readOnly?: boolean;
 };
 
 export function BlockNoteDocumentEditor({
   initialBlocks,
   onChange,
+  readOnly = false,
 }: BlockNoteDocumentEditorProps) {
   // BlockNote refuses to initialize with an empty block list — feed it a
   // single empty paragraph so a brand-new document still gives the user
@@ -53,6 +58,7 @@ export function BlockNoteDocumentEditor({
     >
       <BlockNoteView
         editor={editor}
+        editable={!readOnly}
         theme="light"
         onChange={() => onChange(editor.document as BlockNoteBlock[])}
       />

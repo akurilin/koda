@@ -1,7 +1,8 @@
 // Top-level workspace shell: editor on the left, assistant panel on the right.
 //
-// This component owns the document state shared between the two panes and the
-// autosave loop that keeps the server in sync. Responsibilities:
+// This component owns the document state shared between the two panes, the
+// autosave loop that keeps the server in sync, and the assistant-ui runtime
+// both panes read from. Responsibilities:
 //
 //   - Hold the authoritative `document` state on the client.
 //   - Debounce edits from the editor and PUT the full block list to the
@@ -9,6 +10,12 @@
 //     returns the canonical blocks we then re-seat into local state.
 //   - Poll for server-side changes so agent edits made while the user is
 //     idle show up without manual refresh.
+//   - Lock the editor while the agent is running. Having the runtime here
+//     (instead of deeper in the assistant panel) is what makes the lock
+//     possible — the editor side needs to read `thread.isRunning` to set
+//     `readOnly`, flush any pending autosave before the agent starts, and
+//     refresh the document once the agent finishes so the user sees the
+//     final state before they can type again.
 //   - Expose a "Demo text" escape hatch that fully replaces the document
 //     with a preset article, confirmed via a modal because it destroys the
 //     user's current content.
@@ -21,6 +28,11 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AssistantRuntimeProvider, useAuiState } from "@assistant-ui/react";
+import {
+  AssistantChatTransport,
+  useChatRuntime,
+} from "@assistant-ui/react-ai-sdk";
 import { AssistantPanel } from "./assistant-panel";
 import { buildDemoArticleBlocks } from "./demo-article";
 import type {
@@ -51,7 +63,42 @@ type DocumentWorkspaceProps = {
   initialDocument: DocumentWithBlocks;
 };
 
+/**
+ * Outer shell that owns the assistant-ui runtime so both the editor side
+ * (which needs `thread.isRunning` to drive the lock) and the assistant panel
+ * (which needs the runtime for its chat UI) share one source of truth.
+ *
+ * Everything interactive lives in `DocumentWorkspaceInner` — it has to sit
+ * under `AssistantRuntimeProvider` for `useAuiState` to resolve.
+ */
 export function DocumentWorkspace({ initialDocument }: DocumentWorkspaceProps) {
+  // `useMemo` keeps the transport instance stable across renders so the
+  // runtime doesn't rebuild its internal state every time the parent
+  // re-renders.
+  const transport = useMemo(
+    () =>
+      new AssistantChatTransport({
+        api: `/api/chat?documentId=${encodeURIComponent(initialDocument.id)}`,
+      }),
+    [initialDocument.id],
+  );
+  const runtime = useChatRuntime({ transport });
+
+  return (
+    <AssistantRuntimeProvider runtime={runtime}>
+      <DocumentWorkspaceInner initialDocument={initialDocument} />
+    </AssistantRuntimeProvider>
+  );
+}
+
+function DocumentWorkspaceInner({ initialDocument }: DocumentWorkspaceProps) {
+  // `thread.isRunning` flips true the instant the user submits a chat and
+  // stays true until the last stream token / tool call settles. We use it as
+  // the single source of truth for "the agent is writing; humans stand down".
+  // `?? false` covers the fleeting moment before the store is populated.
+  const isAgentRunning =
+    useAuiState((state) => state.thread.isRunning) ?? false;
+
   const [document, setDocument] = useState(initialDocument);
   const [editorVersion, setEditorVersion] = useState(0);
   const [saveState, setSaveState] = useState<"saved" | "saving" | "conflict">(
@@ -70,6 +117,13 @@ export function DocumentWorkspace({ initialDocument }: DocumentWorkspaceProps) {
     JSON.stringify(initialDocument.blocks.map((block) => block.blockJson)),
   );
   const saveTimer = useRef<number | null>(null);
+  // Latest block buffer emitted by the editor, held in a ref so the
+  // agent-start effect can flush whatever's pending without re-binding on
+  // every keystroke.
+  const pendingBlocks = useRef<BlockNoteBlock[] | null>(null);
+  // Previous value of `isAgentRunning`, used to detect transitions in an
+  // effect. React doesn't give us "previous props" natively.
+  const wasAgentRunning = useRef(false);
 
   useEffect(() => {
     documentRef.current = document;
@@ -181,16 +235,53 @@ export function DocumentWorkspace({ initialDocument }: DocumentWorkspaceProps) {
   // PUT. 600ms is short enough to feel live, long enough to batch a flurry.
   const handleEditorChange = useCallback(
     (blocks: BlockNoteBlock[]) => {
+      pendingBlocks.current = blocks;
+
       if (saveTimer.current) {
         window.clearTimeout(saveTimer.current);
       }
 
       saveTimer.current = window.setTimeout(() => {
+        saveTimer.current = null;
+        pendingBlocks.current = null;
         void syncBlocks(blocks);
       }, 600);
     },
     [syncBlocks],
   );
+
+  // Editor-lock transitions around agent runs.
+  //
+  // Entering: the agent is about to read + edit the document server-side,
+  // so if the user has unsaved keystrokes buffered in the debounce we flush
+  // them immediately — otherwise the agent would reason about a stale
+  // snapshot. The sync fetch races the agent's streaming request, but the
+  // sync is a single short round-trip and the first tool call is hundreds
+  // of ms into the stream, so in practice sync lands first.
+  //
+  // Leaving: pull the authoritative document so the editor rehydrates with
+  // the agent's final state before we re-enable typing.
+  useEffect(() => {
+    const justStarted = !wasAgentRunning.current && isAgentRunning;
+    const justFinished = wasAgentRunning.current && !isAgentRunning;
+    wasAgentRunning.current = isAgentRunning;
+
+    if (justStarted) {
+      if (saveTimer.current) {
+        window.clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
+      if (pendingBlocks.current) {
+        const buffered = pendingBlocks.current;
+        pendingBlocks.current = null;
+        void syncBlocks(buffered);
+      }
+    }
+
+    if (justFinished) {
+      void refreshDocument();
+    }
+  }, [isAgentRunning, refreshDocument, syncBlocks]);
 
   // One-shot "replace everything with the preset article" action. Used in
   // demos and as a quick way to reset the doc. Goes through the normal sync
@@ -261,36 +352,46 @@ export function DocumentWorkspace({ initialDocument }: DocumentWorkspaceProps) {
           <button
             type="button"
             onClick={() => setDemoDialogOpen(true)}
-            disabled={demoBusy}
+            disabled={demoBusy || isAgentRunning}
             className="inline-flex items-center gap-1.5 rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-zinc-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900 disabled:cursor-not-allowed disabled:opacity-50"
             data-testid="demo-text-button"
           >
             Demo text
           </button>
           <div
-            className="rounded border border-zinc-200 px-2 py-1 text-xs text-zinc-500"
+            className={`rounded border px-2 py-1 text-xs ${
+              isAgentRunning
+                ? "border-amber-300 bg-amber-50 text-amber-800"
+                : "border-zinc-200 text-zinc-500"
+            }`}
             data-testid="save-state"
           >
-            {saveState === "saving"
-              ? "Saving"
-              : saveState === "conflict"
-                ? "Conflict"
-                : "Saved"}
+            {isAgentRunning
+              ? "Agent editing"
+              : saveState === "saving"
+                ? "Saving"
+                : saveState === "conflict"
+                  ? "Conflict"
+                  : "Saved"}
           </div>
         </header>
-        <div className="min-h-0 flex-1 overflow-auto" data-testid="editor-pane">
+        <div
+          className={`min-h-0 flex-1 overflow-auto transition-opacity ${
+            isAgentRunning ? "opacity-75" : ""
+          }`}
+          data-testid="editor-pane"
+          data-editor-locked={isAgentRunning ? "true" : "false"}
+        >
           <BlockNoteDocumentEditor
             key={editorVersion}
             initialBlocks={editorBlocks}
             onChange={handleEditorChange}
+            readOnly={isAgentRunning}
           />
         </div>
       </section>
       <aside className="flex w-[420px] shrink-0 flex-col bg-zinc-950 text-white">
-        <AssistantPanel
-          documentId={document.id}
-          onRefreshDocument={refreshDocument}
-        />
+        <AssistantPanel onRefreshDocument={refreshDocument} />
       </aside>
       {demoDialogOpen ? (
         <div
