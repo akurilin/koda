@@ -150,23 +150,86 @@ export function WorkshopWorkspace({
     liveEditorBlocksRef.current = currentVersion.blocks;
   }, [currentVersion.blocks]);
 
-  const handleEditorChange = useCallback((blocks: BlockNoteBlock[]) => {
-    liveEditorBlocksRef.current = blocks;
-    // Mutate the current version in place. User edits do not branch —
-    // see plan doc for the rationale.
-    setVersionState((current) => {
-      const next = [...current.versions];
-      next[current.currentVersionIndex] = {
-        ...next[current.currentVersionIndex],
-        blocks,
-        origin:
-          next[current.currentVersionIndex].origin === "original"
-            ? "user"
-            : next[current.currentVersionIndex].origin,
-      };
-      return { ...current, versions: next };
+  // Scroll so the workshopped paragraph sits roughly centered on entry
+  // (and on version swap, since editorKey bumps change the DOM subtree
+  // entirely). The browser clamps at the scroll top, so if the target is
+  // the first paragraph it naturally lands as close to center as the
+  // content allows — no special case needed.
+  //
+  // BlockNoteDocumentEditor is loaded via `next/dynamic` with `ssr:false`,
+  // so on initial mount the editor DOM doesn't exist yet and a bare rAF
+  // check would miss the target. A short-lived MutationObserver watches
+  // the pane subtree until the block appears, then scrolls once. The
+  // observer self-disconnects on success and on effect teardown, so it
+  // can't outlive the current editor instance.
+  const editorPaneRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (viewMode !== "latest") {
+      return;
+    }
+    const pane = editorPaneRef.current;
+    if (!pane) {
+      return;
+    }
+    const escapedId =
+      typeof CSS !== "undefined" && "escape" in CSS
+        ? CSS.escape(targetBlock.id)
+        : targetBlock.id;
+    const selector = `[data-node-type="blockOuter"][data-id="${escapedId}"]`;
+
+    const tryScroll = () => {
+      const node = pane.querySelector<HTMLElement>(selector);
+      if (!node) {
+        return false;
+      }
+      node.scrollIntoView({ block: "center", behavior: "auto" });
+      return true;
+    };
+
+    if (tryScroll()) {
+      return;
+    }
+    const observer = new MutationObserver(() => {
+      if (tryScroll()) {
+        observer.disconnect();
+      }
     });
-  }, []);
+    observer.observe(pane, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [editorKey, targetBlock.id, viewMode]);
+
+  const handleEditorChange = useCallback(
+    (blocks: BlockNoteBlock[]) => {
+      // The editor now holds the full document (so surrounding paragraphs
+      // render as read-only context). Versions only track the workshopped
+      // block, so narrow the onChange payload to the target slot. The
+      // filterTransaction lock guarantees non-target blocks never mutate,
+      // but we filter by id here too so we don't accidentally capture
+      // stale context if that ever slips.
+      const targetBlocks = blocks.filter(
+        (block) => block.id === targetBlock.id,
+      );
+      if (targetBlocks.length === 0) {
+        return;
+      }
+      liveEditorBlocksRef.current = targetBlocks;
+      // Mutate the current version in place. User edits do not branch —
+      // see plan doc for the rationale.
+      setVersionState((current) => {
+        const next = [...current.versions];
+        next[current.currentVersionIndex] = {
+          ...next[current.currentVersionIndex],
+          blocks: targetBlocks,
+          origin:
+            next[current.currentVersionIndex].origin === "original"
+              ? "user"
+              : next[current.currentVersionIndex].origin,
+        };
+        return { ...current, versions: next };
+      });
+    },
+    [targetBlock.id],
+  );
 
   const selectVersion = useCallback((index: number) => {
     let landed = false;
@@ -198,41 +261,63 @@ export function WorkshopWorkspace({
     }
   }, []);
 
-  const handleProposedRewrite = useCallback((content: InlineContent[]) => {
-    setVersionState((current) => {
-      const newVersion: Version = {
-        blocks: [
-          {
-            id:
-              typeof crypto !== "undefined" && "randomUUID" in crypto
-                ? crypto.randomUUID()
-                : `prop-${Date.now()}`,
-            type: "paragraph",
-            props: {},
-            content,
-            children: [],
-          },
-        ],
-        origin: "agent",
-      };
-      return {
-        versions: [...current.versions, newVersion],
-        currentVersionIndex: current.versions.length,
-      };
-    });
-    setViewMode("latest");
-    setEditorKey((key) => key + 1);
-  }, []);
+  const handleProposedRewrite = useCallback(
+    (content: InlineContent[]) => {
+      setVersionState((current) => {
+        const newVersion: Version = {
+          blocks: [
+            {
+              // Every version's block carries the original target id so
+              // the editor's lock extension (which matches on id) keeps
+              // working after we remount onto this version. Also keeps
+              // the eventual PATCH identity stable without a later
+              // rewrite at save time.
+              id: targetBlock.id,
+              type: "paragraph",
+              props: {},
+              content,
+              children: [],
+            },
+          ],
+          origin: "agent",
+        };
+        return {
+          versions: [...current.versions, newVersion],
+          currentVersionIndex: current.versions.length,
+        };
+      });
+      setViewMode("latest");
+      setEditorKey((key) => key + 1);
+    },
+    [targetBlock.id],
+  );
 
   // Swap out the editor contents for the currently selected version
   // whenever we explicitly change selection. Note we pass `initialBlocks`
   // to BlockNoteDocumentEditor and rely on `editorKey` to trigger a
   // remount — BlockNote doesn't pick up `initialContent` changes on
   // existing editor instances.
-  const editorSeedBlocks = useMemo(
-    () => currentVersion.blocks,
-    [currentVersion],
-  );
+  //
+  // The editor shows the whole document so the user can see the paragraph
+  // being workshopped in its surrounding context. The target slot is
+  // replaced with the selected version's block(s) so the in-progress edit
+  // is what renders at that position. The lock extension keeps every
+  // other slot read-only.
+  const editorSeedBlocks = useMemo(() => {
+    const targetIndex = documentBlocks.findIndex(
+      (block) => block.id === targetBlock.id,
+    );
+    if (targetIndex === -1) {
+      // The server validated the block exists at workshop entry, so this
+      // only fires in pathological cases (e.g., a race where the parent
+      // mutated documentBlocks). Fall back to target-only rendering —
+      // worse visual, but the editor still works.
+      return currentVersion.blocks;
+    }
+    const merged = [...documentBlocks];
+    merged.splice(targetIndex, 1, ...currentVersion.blocks);
+    return merged;
+  }, [documentBlocks, targetBlock.id, currentVersion]);
 
   const doSave = useCallback(
     async (consolidate: boolean) => {
@@ -405,15 +490,20 @@ export function WorkshopWorkspace({
           </div>
         </header>
         <div
+          ref={editorPaneRef}
           className="min-h-0 flex-1 overflow-auto"
           data-testid="workshop-editor-pane"
         >
           {viewMode === "latest" ? (
-            <BlockNoteDocumentEditor
-              key={editorKey}
-              initialBlocks={editorSeedBlocks}
-              onChange={handleEditorChange}
-            />
+            <>
+              <ContextLockStyles targetBlockId={targetBlock.id} />
+              <BlockNoteDocumentEditor
+                key={editorKey}
+                initialBlocks={editorSeedBlocks}
+                onChange={handleEditorChange}
+                lockedToBlockId={targetBlock.id}
+              />
+            </>
           ) : (
             <DiffView
               mode={viewMode}
@@ -794,6 +884,47 @@ function versionToPlainText(version: Version): string {
     .map((block) => inlineContentToPlainText(block.content))
     .filter(Boolean)
     .join(" ");
+}
+
+/**
+ * Scoped style tag that greys out every block in the workshop editor pane
+ * except the one being workshopped.
+ *
+ * Rendered inline because the target id is only known at runtime — a
+ * static stylesheet can't do "not equal to this specific UUID". Escaping
+ * defends against ids that ever stop being plain alphanumeric (DB ids
+ * today are UUIDs, but the extra line is cheap). The workshop route is
+ * client-only (`ssr: false`), so CSS.escape is available when this
+ * renders.
+ */
+function ContextLockStyles({ targetBlockId }: { targetBlockId: string }) {
+  const escapedId =
+    typeof CSS !== "undefined" && "escape" in CSS
+      ? CSS.escape(targetBlockId)
+      : targetBlockId;
+  const css = `
+    [data-testid="workshop-editor-pane"] [data-node-type="blockOuter"]:not([data-id="${escapedId}"]) {
+      opacity: 0.35;
+      transition: opacity 120ms ease;
+    }
+    [data-testid="workshop-editor-pane"] [data-node-type="blockOuter"]:not([data-id="${escapedId}"]) * {
+      cursor: default;
+    }
+    [data-testid="workshop-editor-pane"] [data-node-type="blockOuter"][data-id="${escapedId}"] {
+      position: relative;
+    }
+    [data-testid="workshop-editor-pane"] [data-node-type="blockOuter"][data-id="${escapedId}"]::before {
+      content: "";
+      position: absolute;
+      left: -14px;
+      top: 6px;
+      bottom: 6px;
+      width: 2px;
+      background: rgb(217 119 6);
+      border-radius: 1px;
+    }
+  `;
+  return <style data-testid="workshop-context-lock-styles">{css}</style>;
 }
 
 function inlineContentToPlainText(content: BlockNoteBlock["content"]): string {

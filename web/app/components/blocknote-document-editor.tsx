@@ -32,6 +32,8 @@ import {
 } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/mantine";
 import { SideMenuExtension } from "@blocknote/core/extensions";
+import { createExtension } from "@blocknote/core";
+import { Plugin, PluginKey } from "prosemirror-state";
 import { useMemo } from "react";
 import { FaHammer } from "react-icons/fa";
 import type { BlockNoteBlock } from "@/src/shared/documents";
@@ -48,6 +50,13 @@ type BlockNoteDocumentEditorProps = {
   // nested "workshop this paragraph" affordance inside an existing
   // workshop.
   onWorkshopBlock?: (block: BlockNoteBlock) => void;
+  // When set, only the block with this id is editable — every other block
+  // in the editor is locked read-only. Used by workshop mode to keep the
+  // surrounding document visible as context while the user refines a
+  // single paragraph. Locking is enforced at the ProseMirror transaction
+  // layer (see `buildLockedBlockExtension`) so typing in a locked block
+  // simply produces no state change — no flicker, no revert.
+  lockedToBlockId?: string;
 };
 
 export function BlockNoteDocumentEditor({
@@ -55,6 +64,7 @@ export function BlockNoteDocumentEditor({
   onChange,
   readOnly = false,
   onWorkshopBlock,
+  lockedToBlockId,
 }: BlockNoteDocumentEditorProps) {
   // BlockNote refuses to initialize with an empty block list — feed it a
   // single empty paragraph so a brand-new document still gives the user
@@ -71,6 +81,17 @@ export function BlockNoteDocumentEditor({
     ],
     [],
   );
+  // Lazily build a per-mount lock extension. The extension is tied to a
+  // specific block id at creation time, which is exactly the workshop
+  // lifetime (one target per mount) — remounting on target change is
+  // already what `editorKey` triggers in the parent.
+  const lockExtensions = useMemo(
+    () =>
+      lockedToBlockId
+        ? [buildLockedBlockExtension(lockedToBlockId)]
+        : undefined,
+    [lockedToBlockId],
+  );
   // `as never` casts bridge our narrowed `BlockNoteBlock` type to the
   // editor's looser internal type without pulling the editor's full type
   // graph into the server-side domain.
@@ -79,12 +100,14 @@ export function BlockNoteDocumentEditor({
       initialBlocks.length > 0
         ? (initialBlocks as never)
         : (emptyDocument as never),
+    extensions: lockExtensions,
   });
 
   return (
     <div
       className="mx-auto min-h-full max-w-3xl px-10 py-12"
       data-testid="editor"
+      data-locked-block-id={lockedToBlockId}
     >
       <BlockNoteView
         editor={editor}
@@ -102,7 +125,10 @@ export function BlockNoteDocumentEditor({
           <SideMenuController
             sideMenu={() => (
               <SideMenu>
-                <WorkshopSideMenuButton onWorkshopBlock={onWorkshopBlock} />
+                <WorkshopSideMenuButton
+                  onWorkshopBlock={onWorkshopBlock}
+                  lockedToBlockId={lockedToBlockId}
+                />
               </SideMenu>
             )}
           />
@@ -110,6 +136,77 @@ export function BlockNoteDocumentEditor({
       </BlockNoteView>
     </div>
   );
+}
+
+/**
+ * Extension that pins editability to a single block id.
+ *
+ * Works by installing a ProseMirror `filterTransaction` that rejects any
+ * doc-changing transaction whose steps touch positions outside the target
+ * block's position range in the current doc. Selection moves, focus, and
+ * other non-doc transactions pass through untouched so the caret can still
+ * roam and the user can still select / copy from locked blocks.
+ *
+ * The target id is captured in this closure on mount. Workshop mode
+ * remounts the editor whenever the target changes (via `editorKey`), so
+ * a stale closure is not a concern here.
+ *
+ * Note: this does not prevent the caret from physically moving into a
+ * locked block via arrow keys — we intentionally skip selection clamping
+ * for v1. The caret may blink in a neighbor but no typing will take
+ * effect there.
+ */
+function buildLockedBlockExtension(targetBlockId: string) {
+  return createExtension({
+    key: "workshop-lock",
+    prosemirrorPlugins: [
+      new Plugin({
+        key: new PluginKey("workshopLock"),
+        filterTransaction(tr, state) {
+          if (!tr.docChanged) {
+            return true;
+          }
+
+          // Locate the target block's range in the pre-transaction doc.
+          // BlockNote's `blockContainer` node carries the `id` attr
+          // (see UniqueID registration in BlockNote core); we compare
+          // against that to decide what's in-bounds.
+          let targetFrom = -1;
+          let targetTo = -1;
+          state.doc.descendants((node, pos) => {
+            if (targetFrom !== -1) {
+              return false;
+            }
+            if (node.attrs && node.attrs.id === targetBlockId) {
+              targetFrom = pos;
+              targetTo = pos + node.nodeSize;
+              return false;
+            }
+            return true;
+          });
+
+          // Target missing from the doc (shouldn't happen — workshop
+          // entry validates the block exists) — fail closed.
+          if (targetFrom === -1) {
+            return false;
+          }
+
+          for (const step of tr.steps) {
+            let outside = false;
+            step.getMap().forEach((oldStart, oldEnd) => {
+              if (oldStart < targetFrom || oldEnd > targetTo) {
+                outside = true;
+              }
+            });
+            if (outside) {
+              return false;
+            }
+          }
+          return true;
+        },
+      }),
+    ],
+  });
 }
 
 /**
@@ -123,8 +220,10 @@ export function BlockNoteDocumentEditor({
  */
 function WorkshopSideMenuButton({
   onWorkshopBlock,
+  lockedToBlockId,
 }: {
   onWorkshopBlock: (block: BlockNoteBlock) => void;
+  lockedToBlockId?: string;
 }) {
   const Components = useComponentsContext()!;
   const block = useExtensionState(SideMenuExtension, {
@@ -136,6 +235,14 @@ function WorkshopSideMenuButton({
   }
 
   if (block.type !== "paragraph") {
+    return null;
+  }
+
+  // When the editor is locked to a specific block, suppress the hammer
+  // side menu for every other block — there is no sensible "workshop
+  // this" action for a block the user can't even edit in the current
+  // session.
+  if (lockedToBlockId && block.id !== lockedToBlockId) {
     return null;
   }
 
