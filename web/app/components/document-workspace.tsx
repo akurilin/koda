@@ -380,6 +380,16 @@ function DocumentWorkspaceInner({
         window.clearTimeout(saveTimer.current);
         saveTimer.current = null;
       }
+      // Rewrite the current history entry to point at the block we're
+      // about to workshop before pushing the workshop URL. That way the
+      // browser back button from inside the workshop lands on a main-doc
+      // URL whose `?focus=` is the block the user just clicked — not
+      // whatever focus was encoded by a previous workshop session. Using
+      // `window.history.replaceState` directly instead of
+      // `router.replace` avoids an unnecessary render cycle, since the
+      // very next action is a push away from this URL anyway.
+      const backTargetUrl = `/documents/${document.id}?focus=${encodeURIComponent(block.id)}`;
+      window.history.replaceState(null, "", backTargetUrl);
       router.push(`/documents/${document.id}/workshop/${block.id}`);
     },
     [document.id, router],
