@@ -260,8 +260,15 @@ for now.
 
 Longer-form write-ups live in [`docs/`](docs/):
 
+- [`docs/architecture.md`](docs/architecture.md) — descriptive map of the
+  system as it exists today: module layers, HTTP API surface, core types,
+  database schema, and the data flows for document sync, the main-editor
+  agent, and workshop mode.
 - [`docs/agentic-editor-plan.md`](docs/agentic-editor-plan.md) — the
   original product brief and architectural sketch this repo implements.
+- [`docs/workshop-feature.md`](docs/workshop-feature.md) — design
+  rationale for workshop mode (why it's modal, ephemeral, and contained
+  behind a single `proposeRewrite` tool).
 - [`CLAUDE.md`](CLAUDE.md) — single source of truth for working rules on
   this codebase: runtime pins, the pre-commit gate, Supabase migration
   conventions, SQL identifier rules, and documentation expectations. The
