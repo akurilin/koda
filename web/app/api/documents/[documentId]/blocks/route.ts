@@ -9,6 +9,11 @@ import {
   appendBlock,
   insertBlockAfter,
 } from "@/src/server/documents/document-service";
+import {
+  appendBlockBodySchema,
+  documentRouteParamsSchema,
+} from "@/src/server/documents/document-schemas";
+import { parseJsonBody, parseUnknown } from "@/src/server/api/validation";
 
 type BlocksRouteContext = {
   params: Promise<{
@@ -17,19 +22,28 @@ type BlocksRouteContext = {
 };
 
 export async function POST(request: Request, context: BlocksRouteContext) {
-  const { documentId } = await context.params;
-  const body = await request.json();
+  const params = parseUnknown(await context.params, documentRouteParamsSchema);
+
+  if (!params.ok) {
+    return params.response;
+  }
+
+  const body = await parseJsonBody(request, appendBlockBodySchema);
+
+  if (!body.ok) {
+    return body.response;
+  }
 
   const block =
-    body.afterBlockId === undefined
+    body.data.afterBlockId === undefined
       ? await appendBlock({
-          documentId,
-          blockJson: body.blockJson,
+          documentId: params.data.documentId,
+          blockJson: body.data.blockJson,
         })
       : await insertBlockAfter({
-          documentId,
-          referenceBlockId: body.afterBlockId,
-          blockJson: body.blockJson,
+          documentId: params.data.documentId,
+          referenceBlockId: body.data.afterBlockId,
+          blockJson: body.data.blockJson,
         });
 
   return Response.json(block, { status: 201 });

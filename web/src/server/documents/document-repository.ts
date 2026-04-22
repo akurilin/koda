@@ -7,6 +7,7 @@
 // in one place.
 
 import { sql } from "@/src/server/db/postgres";
+import { normalizeBlock } from "@/src/server/documents/blocknote-blocks";
 import {
   BlockNoteBlock,
   DocumentBlockRecord,
@@ -579,19 +580,36 @@ function mapDocumentRow(row: RawDocumentRow): DocumentRecord {
 }
 
 function mapBlockRow(row: RawBlockRow): DocumentBlockRecord {
+  const blockJson = normalizeStoredBlockJson(row);
+
   return {
     id: row.id,
     documentId: row.document_id,
     sortIndex: row.sort_index,
     blockType: row.block_type,
     contentFormat: row.content_format,
-    blockJson: row.block_json,
+    blockJson,
     plainText: row.plain_text,
     revision: row.revision,
     feedback: row.agent_feedback,
     createdAt: toIsoString(row.created_at),
     updatedAt: toIsoString(row.updated_at),
   };
+}
+
+function normalizeStoredBlockJson(row: RawBlockRow): BlockNoteBlock {
+  const blockJson = normalizeBlock(row.block_json);
+
+  // These checks catch out-of-band JSONB edits that the DB's scalar CHECK
+  // constraints cannot see. App writes always keep the row mirrors in sync.
+  if (blockJson.id !== row.id) {
+    throw new Error("Stored block JSON id does not match the row id.");
+  }
+  if (blockJson.type !== row.block_type) {
+    throw new Error("Stored block JSON type does not match the row type.");
+  }
+
+  return blockJson;
 }
 
 // postgres.js returns timestamps as Date when type-aware, as strings

@@ -11,6 +11,12 @@ import {
   replaceBlock,
   replaceBlockText,
 } from "@/src/server/documents/document-service";
+import {
+  blockRouteParamsSchema,
+  deleteBlockBodySchema,
+  patchBlockBodySchema,
+} from "@/src/server/documents/document-schemas";
+import { parseJsonBody, parseUnknown } from "@/src/server/api/validation";
 
 type BlockRouteContext = {
   params: Promise<{
@@ -20,7 +26,13 @@ type BlockRouteContext = {
 };
 
 export async function GET(_request: Request, context: BlockRouteContext) {
-  const { documentId, blockId } = await context.params;
+  const params = parseUnknown(await context.params, blockRouteParamsSchema);
+
+  if (!params.ok) {
+    return params.response;
+  }
+
+  const { documentId, blockId } = params.data;
   const document = await getDocument(documentId);
   const block = document?.blocks.find((item) => item.id === blockId);
 
@@ -32,29 +44,32 @@ export async function GET(_request: Request, context: BlockRouteContext) {
 }
 
 export async function PATCH(request: Request, context: BlockRouteContext) {
-  const { documentId, blockId } = await context.params;
-  const body = await request.json();
-  const expectedRevision = Number(body.expectedRevision);
+  const params = parseUnknown(await context.params, blockRouteParamsSchema);
 
-  if (!Number.isInteger(expectedRevision)) {
-    return Response.json(
-      { error: "expectedRevision must be an integer." },
-      { status: 400 },
-    );
+  if (!params.ok) {
+    return params.response;
   }
 
+  const body = await parseJsonBody(request, patchBlockBodySchema);
+
+  if (!body.ok) {
+    return body.response;
+  }
+
+  const { documentId, blockId } = params.data;
+  const { expectedRevision } = body.data;
   const result =
-    typeof body.text === "string"
+    "text" in body.data
       ? await replaceBlockText({
           documentId,
           blockId,
-          text: body.text,
+          text: body.data.text,
           expectedRevision,
         })
       : await replaceBlock({
           documentId,
           blockId,
-          blockJson: body.blockJson,
+          blockJson: body.data.blockJson,
           expectedRevision,
         });
 
@@ -72,21 +87,23 @@ export async function PATCH(request: Request, context: BlockRouteContext) {
 }
 
 export async function DELETE(request: Request, context: BlockRouteContext) {
-  const { documentId, blockId } = await context.params;
-  const body = await request.json().catch(() => ({}));
-  const expectedRevision = Number(body.expectedRevision);
+  const params = parseUnknown(await context.params, blockRouteParamsSchema);
 
-  if (!Number.isInteger(expectedRevision)) {
-    return Response.json(
-      { error: "expectedRevision must be an integer." },
-      { status: 400 },
-    );
+  if (!params.ok) {
+    return params.response;
   }
 
+  const body = await parseJsonBody(request, deleteBlockBodySchema);
+
+  if (!body.ok) {
+    return body.response;
+  }
+
+  const { documentId, blockId } = params.data;
   const result = await deleteBlock({
     documentId,
     blockId,
-    expectedRevision,
+    expectedRevision: body.data.expectedRevision,
   });
 
   if (!result.ok) {

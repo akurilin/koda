@@ -5,6 +5,11 @@
 // any mismatch into a 409 so the client can refetch and re-emit its diff.
 
 import { syncDocumentBlocks } from "@/src/server/documents/document-service";
+import {
+  documentRouteParamsSchema,
+  syncBlocksBodySchema,
+} from "@/src/server/documents/document-schemas";
+import { parseJsonBody, parseUnknown } from "@/src/server/api/validation";
 
 type SyncRouteContext = {
   params: Promise<{
@@ -13,20 +18,22 @@ type SyncRouteContext = {
 };
 
 export async function PUT(request: Request, context: SyncRouteContext) {
-  const { documentId } = await context.params;
-  const body = await request.json();
+  const params = parseUnknown(await context.params, documentRouteParamsSchema);
+
+  if (!params.ok) {
+    return params.response;
+  }
+
+  const body = await parseJsonBody(request, syncBlocksBodySchema);
+
+  if (!body.ok) {
+    return body.response;
+  }
 
   const result = await syncDocumentBlocks({
-    documentId,
-    // Tolerate missing / malformed fields by coercing to empty defaults;
-    // the service layer is the one that validates individual block shapes.
-    blocks: Array.isArray(body.blocks) ? body.blocks : [],
-    expectedRevisions:
-      body.expectedRevisions &&
-      typeof body.expectedRevisions === "object" &&
-      !Array.isArray(body.expectedRevisions)
-        ? body.expectedRevisions
-        : {},
+    documentId: params.data.documentId,
+    blocks: body.data.blocks,
+    expectedRevisions: body.data.expectedRevisions,
   });
 
   if (!result.ok) {

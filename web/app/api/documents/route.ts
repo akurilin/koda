@@ -6,23 +6,19 @@
 // tests that need an isolated row tagged with their own `testRunId`. When we
 // grow a multi-document UI this guard can be relaxed.
 
+import { parseJsonBody } from "@/src/server/api/validation";
 import { createDocument } from "@/src/server/documents/document-service";
+import { createDocumentBodySchema } from "@/src/server/documents/document-schemas";
 
 export async function POST(request: Request) {
-  const body = await request.json().catch(() => ({}));
+  const body = await parseJsonBody(request, createDocumentBodySchema);
 
-  if (typeof body.testRunId !== "string" || body.testRunId.length === 0) {
-    return Response.json(
-      {
-        error:
-          "testRunId is required. The app uses a singleton primary document; new documents can only be created for test runs.",
-      },
-      { status: 400 },
-    );
+  if (!body.ok) {
+    return body.response;
   }
 
   const document = await createDocument({
-    testRunId: body.testRunId,
+    testRunId: body.data.testRunId,
   });
 
   return Response.json(document, { status: 201 });

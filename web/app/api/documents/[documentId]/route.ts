@@ -4,6 +4,8 @@ import {
   deleteDocument,
   getDocument,
 } from "@/src/server/documents/document-service";
+import { documentRouteParamsSchema } from "@/src/server/documents/document-schemas";
+import { parseUnknown } from "@/src/server/api/validation";
 
 // Next.js 15 makes route `params` a Promise; typing it here keeps the
 // async-await in the handler readable.
@@ -14,7 +16,13 @@ type DocumentRouteContext = {
 };
 
 export async function GET(_request: Request, context: DocumentRouteContext) {
-  const { documentId } = await context.params;
+  const params = parseUnknown(await context.params, documentRouteParamsSchema);
+
+  if (!params.ok) {
+    return params.response;
+  }
+
+  const { documentId } = params.data;
   const document = await getDocument(documentId);
 
   if (!document) {
@@ -25,7 +33,13 @@ export async function GET(_request: Request, context: DocumentRouteContext) {
 }
 
 export async function DELETE(_request: Request, context: DocumentRouteContext) {
-  const { documentId } = await context.params;
+  const params = parseUnknown(await context.params, documentRouteParamsSchema);
+
+  if (!params.ok) {
+    return params.response;
+  }
+
+  const { documentId } = params.data;
   await deleteDocument(documentId);
 
   return new Response(null, { status: 204 });

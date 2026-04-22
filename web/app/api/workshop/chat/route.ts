@@ -19,91 +19,60 @@
 import { anthropic } from "@ai-sdk/anthropic";
 import {
   convertToModelMessages,
+  safeValidateUIMessages,
   stepCountIs,
   streamText,
   tool,
   type UIMessage,
 } from "ai";
 import { z } from "zod";
+import { parseJsonBody } from "@/src/server/api/validation";
 import { normalizeInlineContentArray } from "@/src/server/documents/blocknote-blocks";
+import {
+  inlineContentArraySchema,
+  workshopChatBodySchema,
+  workshopContextSchema,
+} from "@/src/server/documents/document-schemas";
 import type { BlockNoteBlock, InlineContent } from "@/src/shared/documents";
 
-type WorkshopContext = {
-  documentBlocks: BlockNoteBlock[];
-  targetBlockId: string;
-  versions: InlineContent[][];
-  currentVersionIndex: number;
-  // Freeform note the main-editor agent left on this block during a
-  // whole-article review. When present, the client renders it as the
-  // opening assistant message of the workshop thread and the system
-  // prompt folds it in so the model knows what the user was invited
-  // to address. Null when there's no carried-over feedback.
-  feedback: string | null;
-};
-
-type WorkshopRequestBody = {
-  messages: UIMessage[];
-  context: WorkshopContext;
-};
+type WorkshopContext = z.infer<typeof workshopContextSchema>;
 
 export async function POST(request: Request) {
-  const body = (await request.json()) as WorkshopRequestBody;
-  const { messages, context } = body;
+  const body = await parseJsonBody(request, workshopChatBodySchema);
 
-  if (!context || typeof context.targetBlockId !== "string") {
-    return Response.json(
-      { error: "Workshop context is required." },
-      { status: 400 },
-    );
+  if (!body.ok) {
+    return body.response;
   }
 
-  if (!Array.isArray(context.versions) || context.versions.length === 0) {
+  const tools = createWorkshopTools();
+  const messages = await safeValidateUIMessages<UIMessage>({
+    messages: body.data.messages,
+    tools: tools as Parameters<
+      typeof safeValidateUIMessages<UIMessage>
+    >[0]["tools"],
+  });
+
+  if (!messages.success) {
     return Response.json(
-      { error: "Workshop context must include at least one version." },
+      {
+        error: "Invalid request.",
+        issues: [
+          {
+            path: "messages",
+            message: messages.error.message,
+            code: "invalid_ui_messages",
+          },
+        ],
+      },
       { status: 400 },
     );
   }
 
   const result = streamText({
     model: anthropic(process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-5"),
-    system: composeWorkshopSystemPrompt(context),
-    messages: await convertToModelMessages(messages),
-    tools: {
-      proposeRewrite: tool({
-        description: [
-          "Propose a new version of the paragraph being workshopped.",
-          "The `content` argument is an array of BlockNote inline-content items.",
-          "Each item is either",
-          '`{ "type": "text", "text": string, "styles": { "bold"?: true, "italic"?: true, "underline"?: true, "strike"?: true, "code"?: true } }`',
-          'or `{ "type": "link", "href": string, "content": [ ...text items... ] }`.',
-          "Preserve any bold, italic, underline, strike, code, and link spans from the",
-          "current version unless the user explicitly asks you to change them — the",
-          "prompt renders existing styling in markdown form (`**bold**`, `_italic_`,",
-          "`` `code` ``, `~~strike~~`, `[text](url)`) so you can tell which spans are styled.",
-          "Use this tool when you have a concrete rewrite to offer; do not use it for",
-          "questions or clarifications.",
-        ].join(" "),
-        inputSchema: z.object({
-          content: z
-            .array(z.any())
-            .describe(
-              "InlineContent array representing the proposed paragraph.",
-            ),
-        }),
-        execute: async ({ content }) => {
-          try {
-            const normalized = normalizeInlineContentArray(content);
-            return { ok: true as const, content: normalized };
-          } catch (error) {
-            return {
-              ok: false as const,
-              reason:
-                error instanceof Error ? error.message : "Invalid content.",
-            };
-          }
-        },
-      }),
-    },
+    system: composeWorkshopSystemPrompt(body.data.context),
+    messages: await convertToModelMessages(messages.data),
+    tools,
     // Small cap: the agent may emit at most a propose + a follow-up message
     // per user turn. We don't need deep tool loops here because there's only
     // one tool and it never returns a recoverable error.
@@ -111,6 +80,42 @@ export async function POST(request: Request) {
   });
 
   return result.toUIMessageStreamResponse();
+}
+
+function createWorkshopTools() {
+  return {
+    proposeRewrite: tool({
+      description: [
+        "Propose a new version of the paragraph being workshopped.",
+        "The `content` argument is an array of BlockNote inline-content items.",
+        "Each item is either",
+        '`{ "type": "text", "text": string, "styles": { "bold"?: true, "italic"?: true, "underline"?: true, "strike"?: true, "code"?: true } }`',
+        'or `{ "type": "link", "href": string, "content": [ ...text items... ] }`.',
+        "Preserve any bold, italic, underline, strike, code, and link spans from the",
+        "current version unless the user explicitly asks you to change them — the",
+        "prompt renders existing styling in markdown form (`**bold**`, `_italic_`,",
+        "`` `code` ``, `~~strike~~`, `[text](url)`) so you can tell which spans are styled.",
+        "Use this tool when you have a concrete rewrite to offer; do not use it for",
+        "questions or clarifications.",
+      ].join(" "),
+      inputSchema: z.strictObject({
+        content: inlineContentArraySchema.describe(
+          "InlineContent array representing the proposed paragraph.",
+        ),
+      }),
+      execute: async ({ content }) => {
+        try {
+          const normalized = normalizeInlineContentArray(content);
+          return { ok: true as const, content: normalized };
+        } catch (error) {
+          return {
+            ok: false as const,
+            reason: error instanceof Error ? error.message : "Invalid content.",
+          };
+        }
+      },
+    }),
+  };
 }
 
 /**

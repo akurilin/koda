@@ -68,7 +68,7 @@ describe("blocknote block utilities", () => {
         props: {},
         children: [],
       }),
-    ).toThrow("Unsupported block type");
+    ).toThrow();
   });
 
   it("rejects blocks with nested children", () => {
@@ -89,6 +89,42 @@ describe("blocknote block utilities", () => {
         ],
       }),
     ).toThrow("Nested block children are not supported.");
+  });
+
+  it("rejects unsafe links", () => {
+    expect(() =>
+      normalizeBlock({
+        id: "block-a",
+        type: "paragraph",
+        props: {},
+        content: [
+          {
+            type: "link",
+            href: "javascript:alert(1)",
+            content: [{ type: "text", text: "bad", styles: {} }],
+          },
+        ],
+        children: [],
+      }),
+    ).toThrow("Link href must use http, https, or mailto.");
+  });
+
+  it("rejects unsupported inline style keys", () => {
+    expect(() =>
+      normalizeBlock({
+        id: "block-a",
+        type: "paragraph",
+        props: {},
+        content: [
+          {
+            type: "text",
+            text: "styled",
+            styles: { color: "red" },
+          },
+        ],
+        children: [],
+      }),
+    ).toThrow();
   });
 
   it("sorts document rows by sort index", () => {

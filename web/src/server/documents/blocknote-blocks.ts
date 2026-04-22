@@ -14,6 +14,10 @@ import {
   SupportedBlockType,
   supportedBlockTypes,
 } from "@/src/shared/documents";
+import {
+  blockNoteBlockSchema,
+  inlineContentArraySchema,
+} from "./document-schemas";
 
 const supportedBlockTypeSet = new Set<string>(supportedBlockTypes);
 
@@ -88,40 +92,14 @@ export function normalizeBlock(
   value: unknown,
   forcedId?: string,
 ): BlockNoteBlock {
-  if (!isRecord(value)) {
-    throw new Error("Block must be an object.");
-  }
-
-  const id = forcedId ?? value.id;
-  if (typeof id !== "string" || id.length === 0) {
-    throw new Error("Block must have a non-empty string id.");
-  }
-
-  const type = value.type;
-  if (typeof type !== "string" || !isSupportedBlockType(type)) {
-    throw new Error(`Unsupported block type: ${String(type)}`);
-  }
-
-  const props = isRecord(value.props) ? value.props : {};
-  const content = normalizeInlineContent(value.content);
-
-  // The editor treats the document as a flat list of blocks. Accept the field
-  // because BlockNote always emits it, but refuse any nested children so we
-  // never persist a tree we don't know how to address elsewhere in the app.
-  if (value.children !== undefined && !Array.isArray(value.children)) {
-    throw new Error("Block children must be an array.");
-  }
-  if (Array.isArray(value.children) && value.children.length > 0) {
-    throw new Error("Nested block children are not supported.");
-  }
-
-  return {
-    id,
-    type,
-    props,
-    content,
-    children: [],
-  };
+  const candidate =
+    forcedId && isRecord(value)
+      ? {
+          ...value,
+          id: forcedId,
+        }
+      : value;
+  return blockNoteBlockSchema.parse(candidate);
 }
 
 /**
@@ -139,16 +117,7 @@ export function validateBlock(block: unknown): asserts block is BlockNoteBlock {
  * as structured arrays so callers can't smuggle plain text past the format.
  */
 export function normalizeInlineContentArray(content: unknown): InlineContent[] {
-  if (!Array.isArray(content)) {
-    throw new Error("Inline content must be an array.");
-  }
-
-  const normalized = normalizeInlineContent(content);
-  if (typeof normalized === "string") {
-    throw new Error("Inline content must be an array, not a string.");
-  }
-
-  return normalized;
+  return inlineContentArraySchema.parse(content);
 }
 
 /**
@@ -199,49 +168,15 @@ function inlineContentToPlainText(content: BlockNoteBlock["content"]): string {
 export function normalizeInlineContent(
   content: unknown,
 ): string | InlineContent[] {
-  if (content === undefined || content === null) {
-    return [];
-  }
-
-  if (typeof content === "string") {
-    return content ? [{ type: "text", text: content, styles: {} }] : [];
-  }
-
-  if (!Array.isArray(content)) {
-    throw new Error("Block content must be a string or an array.");
-  }
-
-  return content.map((item) => {
-    if (!isRecord(item)) {
-      throw new Error("Inline content must be an object.");
-    }
-
-    if (item.type === "text") {
-      if (typeof item.text !== "string") {
-        throw new Error("Text inline content must include text.");
-      }
-
-      return {
-        type: "text",
-        text: item.text,
-        styles: isRecord(item.styles) ? item.styles : {},
-      };
-    }
-
-    if (item.type === "link") {
-      if (typeof item.href !== "string") {
-        throw new Error("Link inline content must include href.");
-      }
-
-      return {
-        type: "link",
-        href: item.href,
-        content: normalizeInlineContent(item.content) as InlineContent[],
-      };
-    }
-
-    throw new Error(`Unsupported inline content type: ${String(item.type)}`);
-  });
+  return (
+    blockNoteBlockSchema.parse({
+      id: "__inline_content_probe__",
+      type: "paragraph",
+      props: {},
+      content,
+      children: [],
+    }).content ?? []
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

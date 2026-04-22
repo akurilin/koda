@@ -6,6 +6,11 @@
 // edited between your read and your move.
 
 import { moveBlock } from "@/src/server/documents/document-service";
+import {
+  blockRouteParamsSchema,
+  moveBlockBodySchema,
+} from "@/src/server/documents/document-schemas";
+import { parseJsonBody, parseUnknown } from "@/src/server/api/validation";
 
 type MoveRouteContext = {
   params: Promise<{
@@ -15,26 +20,23 @@ type MoveRouteContext = {
 };
 
 export async function POST(request: Request, context: MoveRouteContext) {
-  const { documentId, blockId } = await context.params;
-  const body = await request.json();
-  const expectedRevision =
-    body.expectedRevision === undefined
-      ? undefined
-      : Number(body.expectedRevision);
+  const params = parseUnknown(await context.params, blockRouteParamsSchema);
 
-  if (expectedRevision !== undefined && !Number.isInteger(expectedRevision)) {
-    return Response.json(
-      { error: "expectedRevision must be an integer." },
-      { status: 400 },
-    );
+  if (!params.ok) {
+    return params.response;
+  }
+
+  const body = await parseJsonBody(request, moveBlockBodySchema);
+
+  if (!body.ok) {
+    return body.response;
   }
 
   const result = await moveBlock({
-    documentId,
-    blockId,
-    afterBlockId:
-      typeof body.afterBlockId === "string" ? body.afterBlockId : null,
-    expectedRevision,
+    documentId: params.data.documentId,
+    blockId: params.data.blockId,
+    afterBlockId: body.data.afterBlockId,
+    expectedRevision: body.data.expectedRevision,
   });
 
   if (!result.ok) {
