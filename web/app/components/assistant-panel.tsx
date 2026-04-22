@@ -43,8 +43,9 @@ export function AssistantPanel({ onRefreshDocument }: AssistantPanelProps) {
         <ThreadPrimitive.Viewport className="min-h-0 flex-1 overflow-auto px-4 py-5">
           <ThreadPrimitive.Empty>
             <div className="rounded border border-white/10 bg-white/[0.03] p-4 text-sm leading-6 text-zinc-300">
-              Ask for focused edits to the current draft. The agent can inspect
-              the document and update individual blocks through tools.
+              Ask for focused edits to the current draft. Or ask for feedback on
+              the text. The agent can inspect the document and update individual
+              blocks through tools.
             </div>
           </ThreadPrimitive.Empty>
           <ThreadPrimitive.Messages
