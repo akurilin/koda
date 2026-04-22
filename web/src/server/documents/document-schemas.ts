@@ -197,7 +197,11 @@ export const syncBlocksBodySchema = z.strictObject({
   expectedRevisions: expectedRevisionsSchema,
 });
 
-export const chatBodySchema = z.strictObject({
+// Loose object (not strictObject): the AI SDK / assistant-ui transport
+// attaches transport-level fields (id, trigger, messageId, metadata, tools,
+// callSettings, system, config) alongside `messages`. We only consume
+// `messages` here; unknown keys are stripped.
+export const chatBodySchema = z.object({
   messages: z.unknown(),
 });
 
@@ -243,7 +247,9 @@ export const workshopContextSchema = z
     }
   });
 
-export const workshopChatBodySchema = z.strictObject({
+// Loose object for the same reason as `chatBodySchema` — the transport
+// sends bookkeeping keys the handler doesn't care about.
+export const workshopChatBodySchema = z.object({
   messages: z.unknown(),
   context: workshopContextSchema,
 });
